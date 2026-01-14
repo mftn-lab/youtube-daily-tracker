@@ -1,0 +1,38 @@
+name: Daily YouTube Snapshot
+
+on:
+  schedule:
+    - cron: "5 7 * * *"   # Tous les jours à 07:05 UTC (~08:05 Paris hiver)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run YouTube collector
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: python collect_youtube.py
+
+      - name: Commit CSV files if changed
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add youtube_daily_snapshots.csv channels_reference.csv run_log.txt
+          git commit -m "Daily YouTube snapshot" || echo "No changes"
+          git push
