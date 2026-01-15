@@ -46,6 +46,12 @@ CHANNEL_IDS = [
     "UCbpNKWuYGQmOaa6zeE1p3PQ",
     "UCM2FcP5_y9L7s5abqrtiL7w",
     "UC4AGoh9ExPFMbjUVe6kyuqg",
+    "UC4AGoh9ExPFMbjUVe6kyuqg",
+    "UCaHolOYkfcTdC0vTFAywzXw",
+    "UC5dizViRLGnzC04tL5jAM1g",
+    "UCxH16958KSxT4Z9yL_9JYtw",
+    "UCXrsOCJFLteZb8cKOmWWqpA",
+    "UCtAtltZN996ISsfv7x5QCpw",
 ]
 
 # Fichiers de sortie
