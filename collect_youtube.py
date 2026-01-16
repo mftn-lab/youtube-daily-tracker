@@ -6,20 +6,20 @@ from typing import Dict, List, Tuple
 import requests
 
 # ------------------------------------------------------------
-# YouTube Daily Tracker — version aboutie (style "Marco")
+# YouTube Daily Tracker
 #
-# Objectif :
-# - Je récupère tous les jours les stats publiques de mes chaînes YouTube
-# - Je stocke l'historique dans un CSV (youtube_daily_snapshots.csv)
-# - Je garde aussi une table de référence (channels_reference.csv)
+# Goal:
+# - Collect public daily statistics for selected tech YouTube channels
+# - Store time-series snapshots in youtube_daily_snapshots.csv
+# - Maintain a reference table in channels_reference.csv (title, URL, last seen)
 #
-# Les 2 idées fortes :
-# 1) La collecte "daily" = une ligne par chaîne et par jour (séries temporelles)
-# 2) La table "reference" = les infos "stables" (titre, url, etc.) pour dashboards
+# Notes:
+# - One row per channel per day (UTC) for time-series analysis
+# - The tracked channel list is defined in CHANNEL_IDS below
 #
-# Sécurité :
-# - Ma clé API est dans GitHub Secrets : YOUTUBE_API_KEY
-# - Jamais en clair dans le code
+# Security:
+# - API key must be provided via environment variable: YOUTUBE_API_KEY
+# - Never hardcode secrets in the repository
 # ------------------------------------------------------------
 
 API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -220,6 +220,10 @@ def main():
 
     # 1) Je valide la liste d'IDs pour éviter les erreurs bêtes
     valid_ids, invalid_ids = validate_channel_ids(CHANNEL_IDS)
+
+    # Sécurité optionnelle : supprime les doublons en conservant l'ordre
+    valid_ids = list(dict.fromkeys(valid_ids))
+    
     if invalid_ids:
         log(f"IDs invalides détectés (ignorés): {invalid_ids}")
 
