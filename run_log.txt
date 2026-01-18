@@ -22,3 +22,9 @@
 [2026-01-17 07:35:05 UTC] CSV daily mis à jour : +25 lignes
 [2026-01-17 07:35:05 UTC] Référence mise à jour : 25 chaînes (titre + URL)
 [2026-01-17 07:35:05 UTC] === Fin du run ===
+[2026-01-18 07:37:05 UTC] === Début du run ===
+[2026-01-18 07:37:05 UTC] Date du snapshot (UTC) : 2026-01-18
+[2026-01-18 07:37:05 UTC] Appel API chunk 1/1 — 25 chaînes
+[2026-01-18 07:37:06 UTC] CSV daily mis à jour : +25 lignes
+[2026-01-18 07:37:06 UTC] Référence mise à jour : 25 chaînes (titre + URL)
+[2026-01-18 07:37:06 UTC] === Fin du run ===
