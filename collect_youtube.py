@@ -172,7 +172,7 @@ def youtube_channels_api_call(channel_ids: List[str]) -> List[dict]:
     raise RuntimeError(f"Échec API après {MAX_RETRIES} tentatives : {last_err}")
 
 
-def load_existing_daily_keys(outfile: str) -> Set[Tuple[str, str]]:
+def load_existing_daily_keys(outfile: str) -> set[tuple[str, str]]:
     # Pour éviter les doublons si le workflow est relancé dans la même journée,
     # on stocke les clés (date_utc, channel_id) déjà présentes dans le fichier.
     keys: Set[Tuple[str, str]] = set()
