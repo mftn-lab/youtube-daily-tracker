@@ -1,8 +1,9 @@
 import os
 import csv
 import time
+import re
 from datetime import datetime, timezone
-from typing import List, Tuple, Set
+from typing import List, Tuple
 import requests
 
 # ------------------------------------------------------------
@@ -66,7 +67,7 @@ CHANNEL_IDS = [
     "UCrsiHZzr4IjuSjnvPy5rVUQ",
     "UCuDNiVxL-Zfw0CBVQ4oOr8w",
     "UCTmHRe6W96WgYlUNxcokpVQ",
-    "UCkS6jlQ4RJTCdkzVCU2-FSQ"
+    "UCkS6jlQ4RJTCdkzVCU2-FSQ",
     "UCSYFVeBI66YqDhGrYKxiCUQ",
     "UCBqYyDusSFntU7k2UnFGsBA",
     "UCCUlTcDhcn72O8TiNfFJWWA",
@@ -120,16 +121,22 @@ def chunk_list(items: List[str], chunk_size: int) -> List[List[str]]:
 
 
 def validate_channel_ids(ids: List[str]) -> Tuple[List[str], List[str]]:
-    # Filtre les IDs pour éviter les appels inutiles
-    # Règle simple : un Channel ID commence par 'UC' et doit être suffisamment long.
+    """
+    Valide les Channel IDs YouTube.
+    Format attendu : UC + 22 caractères (lettres, chiffres, _ ou -)
+    """
+    pattern = re.compile(r"^UC[a-zA-Z0-9_-]{22}$")
+
     valid: List[str] = []
     invalid: List[str] = []
+
     for cid in ids:
         c = cid.strip()
-        if c.startswith("UC") and len(c) >= 10:
+        if pattern.match(c):
             valid.append(c)
         else:
             invalid.append(c)
+
     return valid, invalid
 
 
