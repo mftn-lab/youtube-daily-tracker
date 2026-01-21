@@ -125,7 +125,7 @@ def videos_info(video_ids: List[str]) -> List[Dict[str, Any]]:
 
 def append_rows(rows: List[Dict[str, Any]]):
     file_exists = os.path.exists(OUTPUT_CSV)
-    with open(OUTPUT_CSV, "a", encoding="utf-8", newline="") as f:
+    with open(OUTPUT_CSV, "a", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS)
         if not file_exists:
             w.writeheader()
