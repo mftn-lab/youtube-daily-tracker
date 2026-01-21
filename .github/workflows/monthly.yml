@@ -1,0 +1,35 @@
+name: Monthly Videos Snapshot
+
+on:
+  schedule:
+    - cron: "30 3 1 * *"  # le 1er de chaque mois à 03:30 UTC
+  workflow_dispatch:
+
+jobs:
+  run-monthly-snapshot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run monthly snapshot
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: python monthly_videos_snapshot.py
+
+      - name: Commit and push results
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add youtube_monthly_videos_snapshots.csv
+          git commit -m "monthly: videos snapshot" || echo "No changes to commit"
+          git push
