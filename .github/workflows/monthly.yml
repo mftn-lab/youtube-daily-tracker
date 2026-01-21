@@ -5,6 +5,9 @@ on:
     - cron: "30 3 1 * *"  # le 1er de chaque mois à 03:30 UTC
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   run-monthly-snapshot:
     runs-on: ubuntu-latest
@@ -12,6 +15,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
