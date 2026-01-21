@@ -135,7 +135,7 @@ CHANNEL_IDS = [
     "UC3-dl8nKItitMxM9DNTDAfQ",
     "UCHJb6-VCrzQqVQASN23OskQ",
     "UC69gruQfEHEQ4Qme0liJOdw",
-    "UCOm_kuKVb4ImX_DHpIgX_z",
+    "UCOm_kuKVb4ImX_DHpIgX_zg",
     "UCDY3WI0HqdzNADtE6B-BmUw",
     "UCpFq62uOig4n9jT3luIYUDQ",
     "UCIaNSaws_Wv_eoUAmDbUK-Q",
