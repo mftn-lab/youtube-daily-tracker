@@ -179,7 +179,6 @@ RETRY_SLEEP_SECONDS = 2
 
 
 def log(msg: str) -> None:
-    # Écrit un log simple (utile pour déboguer sans se compliquer la vie)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     line = f"[{stamp}] {msg}"
     print(line)
@@ -187,7 +186,6 @@ def log(msg: str) -> None:
         with open(LOGFILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
-        # Si le log ne marche pas, je ne casse pas le script pour ça
         pass
 
 
@@ -195,10 +193,19 @@ def ensure_daily_dir() -> None:
     DATA_DAILY_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def init_errors_daily_file() -> None:
+    """
+    Crée data/daily/errors_daily.csv avec entête si absent,
+    même s'il n'y a aucune erreur pendant le run.
+    """
+    ensure_daily_dir()
+    if not ERRORS_DAILY_CSV.exists():
+        with open(ERRORS_DAILY_CSV, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            w.writerow(ERRORS_DAILY_HEADER)
+
+
 def append_error_daily(snapshot_utc: str, date_utc: str, channel_id: str, error_type: str, message: str) -> None:
-    """
-    Ajoute une ligne d'erreur dans data/daily/errors_daily.csv
-    """
     ensure_daily_dir()
     file_exists = ERRORS_DAILY_CSV.exists()
     with open(ERRORS_DAILY_CSV, "a", newline="", encoding="utf-8-sig") as f:
@@ -209,9 +216,6 @@ def append_error_daily(snapshot_utc: str, date_utc: str, channel_id: str, error_
 
 
 def safe_int(value, default: int = 0) -> int:
-    # Convertit une valeur en entier
-    # Utile car l'API renvoie parfois des nombres sous forme de string,
-    # ou certains champs peuvent être absents (ex: abonnés masqués).
     try:
         return int(value)
     except Exception:
@@ -219,7 +223,6 @@ def safe_int(value, default: int = 0) -> int:
 
 
 def chunk_list(items: List[str], chunk_size: int) -> List[List[str]]:
-    # Découpe une liste en paquets pour respecter les limites de l'API
     return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
 
 
@@ -244,9 +247,6 @@ def validate_channel_ids(ids: List[str]) -> Tuple[List[str], List[str]]:
 
 
 def youtube_channels_api_call(channel_ids: List[str]) -> List[dict]:
-    # Appel à l'API YouTube Data v3 pour récupérer :
-    # - snippet : titre, infos visibles
-    # - statistics : abonnés, vues, nb de vidéos
     if not API_KEY:
         raise RuntimeError(
             "Je ne trouve pas la clé API. Vérifie le secret / la variable d'environnement 'YOUTUBE_API_KEY'."
@@ -276,8 +276,6 @@ def youtube_channels_api_call(channel_ids: List[str]) -> List[dict]:
 
 
 def load_existing_daily_keys(outfile: str) -> set[tuple[str, str]]:
-    # Pour éviter les doublons si le workflow est relancé dans la même journée,
-    # on stocke les clés (date_utc, channel_id) déjà présentes dans le fichier.
     keys: Set[Tuple[str, str]] = set()
     if not os.path.isfile(outfile):
         return keys
@@ -293,7 +291,6 @@ def load_existing_daily_keys(outfile: str) -> set[tuple[str, str]]:
 
 
 def append_rows_csv(outfile: str, header: List[str], rows: List[List]) -> None:
-    # Ajoute des lignes à un CSV (crée le fichier avec header s'il n'existe pas)
     file_exists = os.path.isfile(outfile)
     with open(outfile, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -303,9 +300,6 @@ def append_rows_csv(outfile: str, header: List[str], rows: List[List]) -> None:
 
 
 def upsert_reference(outfile: str, ref_rows: dict) -> None:
-    # Écrit / met à jour la table de référence :
-    # channel_id -> titre -> url -> last_seen_utc
-    # Si le fichier existe, on le charge puis on met à jour / ajoute les lignes.
     existing = {}
 
     if os.path.isfile(outfile):
@@ -319,7 +313,6 @@ def upsert_reference(outfile: str, ref_rows: dict) -> None:
         except Exception as e:
             log(f"Warning : impossible de lire {outfile} (reference) : {e}")
 
-    # Fusion : je mets à jour / ajoute
     for cid, data in ref_rows.items():
         existing[cid] = data
 
@@ -344,25 +337,21 @@ def main() -> None:
     log("=== Début du run ===")
     log(f"Date du snapshot (UTC) : {today_utc}")
 
-    # Validation des IDs (évite les erreurs bêtes)
-    valid_ids, invalid_ids = validate_channel_ids(CHANNEL_IDS)
+    # ✅ Création du fichier d'erreurs dès le début (même si aucune erreur)
+    init_errors_daily_file()
 
-    # Sécurité optionnelle : supprime les doublons en conservant l'ordre
+    valid_ids, invalid_ids = validate_channel_ids(CHANNEL_IDS)
     valid_ids = list(dict.fromkeys(valid_ids))
 
     if invalid_ids:
         log(f"IDs invalides détectés (ignorés) : {invalid_ids}")
-        # Monitoring CSV
         for bad in invalid_ids:
             append_error_daily(snapshot_utc, today_utc, bad, "FORMAT_INVALID", "Channel ID format invalide (typo probable).")
 
     if not valid_ids:
         raise RuntimeError("Aucun Channel ID valide. Renseigne au moins une chaîne (UC...).")
 
-    # Anti-doublon : si une ligne existe déjà pour (today_utc, channel_id), on n'ajoute pas
     existing_keys = load_existing_daily_keys(DAILY_OUTFILE)
-
-    # Découpage en paquets pour l'API (max 50 IDs par requête)
     chunks = chunk_list(valid_ids, MAX_IDS_PER_REQUEST)
 
     daily_rows_to_append = []
@@ -372,7 +361,6 @@ def main() -> None:
     for idx, chunk in enumerate(chunks, start=1):
         log(f"Appel API chunk {idx}/{len(chunks)} — {len(chunk)} chaînes")
 
-        # ✅ Robustesse : si un chunk échoue, on log et on continue
         try:
             items = youtube_channels_api_call(chunk)
         except Exception as e:
@@ -384,7 +372,6 @@ def main() -> None:
                 )
             continue
 
-        # Transformation de la réponse en lignes propres
         for it in items:
             cid = it.get("id", "")
             if not cid:
@@ -398,17 +385,11 @@ def main() -> None:
             title = snippet.get("title", "")
             url = f"https://www.youtube.com/channel/{cid}"
 
-            # Abonnés : parfois YouTube masque (subscriberCount absent)
             subs = safe_int(stats.get("subscriberCount"), default=0)
             views = safe_int(stats.get("viewCount"), default=0)
             videos = safe_int(stats.get("videoCount"), default=0)
 
-            # Anti-doublon journalier
-            if (today_utc, cid) in existing_keys:
-                continue
-
-            daily_rows_to_append.append([today_utc, cid, title, subs, views, videos])
-
+            # ✅ Toujours mettre à jour la référence si la chaîne est retournée
             ref_updates[cid] = {
                 "channel_id": cid,
                 "channel_title": title,
@@ -416,7 +397,13 @@ def main() -> None:
                 "last_seen_utc": now_utc,
             }
 
-        # IDs demandés mais non retournés sur ce chunk (typo possible ou chaîne indisponible)
+            # Anti-doublon journalier (uniquement pour le daily CSV)
+            if (today_utc, cid) in existing_keys:
+                continue
+
+            daily_rows_to_append.append([today_utc, cid, title, subs, views, videos])
+
+        # IDs demandés mais non retournés sur ce chunk
         returned_ids_chunk = {it.get("id", "") for it in items if it.get("id")}
         missing_chunk = sorted(set(chunk) - returned_ids_chunk)
         if missing_chunk:
@@ -427,7 +414,6 @@ def main() -> None:
                     "ID non retourné par l'API (typo, chaîne supprimée/privée, ou indisponible)."
                 )
 
-    # Écriture du CSV quotidien
     daily_header = ["date_utc", "channel_id", "channel_title", "subscribers", "views", "videos"]
     if daily_rows_to_append:
         append_rows_csv(DAILY_OUTFILE, daily_header, daily_rows_to_append)
@@ -435,7 +421,7 @@ def main() -> None:
     else:
         log("Aucune nouvelle ligne à ajouter (peut-être déjà collecté aujourd'hui).")
 
-    # Écriture / mise à jour de la table de référence
+    # ✅ Référence mise à jour même si aucune nouvelle ligne daily (run relancé)
     if ref_updates:
         upsert_reference(REF_OUTFILE, ref_updates)
         log(f"Référence mise à jour : {len(ref_updates)} chaînes (titre + URL)")
