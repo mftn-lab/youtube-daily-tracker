@@ -19,9 +19,10 @@ import requests
 # - La clé API doit être fournie via la variable d'environnement : YOUTUBE_API_KEY
 # - Ne jamais mettre de secret en clair dans le dépôt
 #
-# + Monitoring (ajout) :
+# Monitoring (ajout) :
 # - Journal d'erreurs daily dans data/daily/errors_daily.csv
 #   -> FORMAT_INVALID / NOT_FOUND / API_ERROR
+# - Le script continue même si un chunk échoue.
 # ------------------------------------------------------------
 
 API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -151,7 +152,7 @@ CHANNEL_IDS = [
     "UCrAiXFptzDmgQA6gUCOz9RQ",
     "UCchpwieM3DswmDEnJ0MRq1A",
     "UCNWE4ouC-BxzJ-Lomuuqb1Q",
-    'UCR3uoYsbRO_S0wg2DaSlb8g',
+    "UCR3uoYsbRO_S0wg2DaSlb8g",
     "UCPP-NkzSqMJ9ywhJkcgrpAw",
     "UCrHCRJPuJJcINMMEETEYt4g",
     "UC70eSjnRIGvRLCzT6K0SQSg",
@@ -165,7 +166,7 @@ DAILY_OUTFILE = "youtube_daily_snapshots.csv"
 REF_OUTFILE = "channels_reference.csv"
 LOGFILE = "run_log.txt"
 
-# Monitoring des erreurs daily
+# Monitoring erreurs
 DATA_DAILY_DIR = Path("data") / "daily"
 ERRORS_DAILY_CSV = DATA_DAILY_DIR / "errors_daily.csv"
 ERRORS_DAILY_HEADER = ["snapshot_utc", "date_utc", "channel_id", "error_type", "message"]
@@ -305,6 +306,7 @@ def upsert_reference(outfile: str, ref_rows: dict) -> None:
     if os.path.isfile(outfile):
         try:
             with open(outfile, "r", newline="", encoding="utf-8") as f:
+            # ^ (garde ton indentation actuelle si elle est correcte)
                 reader = csv.DictReader(f)
                 for row in reader:
                     cid = row.get("channel_id", "")
@@ -337,9 +339,10 @@ def main() -> None:
     log("=== Début du run ===")
     log(f"Date du snapshot (UTC) : {today_utc}")
 
-    # ✅ Création du fichier d'erreurs dès le début (même si aucune erreur)
+    # ✅ Crée data/daily/errors_daily.csv même s'il n'y a aucune erreur
     init_errors_daily_file()
 
+    # Validation des IDs
     valid_ids, invalid_ids = validate_channel_ids(CHANNEL_IDS)
     valid_ids = list(dict.fromkeys(valid_ids))
 
@@ -356,28 +359,28 @@ def main() -> None:
 
     daily_rows_to_append = []
     ref_updates = {}
-    returned_ids = set()
 
     for idx, chunk in enumerate(chunks, start=1):
         log(f"Appel API chunk {idx}/{len(chunks)} — {len(chunk)} chaînes")
 
+        # ✅ Robustesse : si un chunk échoue, on log et on continue
         try:
             items = youtube_channels_api_call(chunk)
         except Exception as e:
             log(f"[WARN] Chunk {idx}/{len(chunks)} ignoré suite à erreur API: {e}")
             for cid in chunk:
-                append_error_daily(
-                    snapshot_utc, today_utc, cid, "API_ERROR",
-                    f"Erreur API channels.list (chunk {idx}/{len(chunks)}): {e}"
-                )
+                append_error_daily(snapshot_utc, today_utc, cid, "API_ERROR",
+                                   f"Erreur API channels.list (chunk {idx}/{len(chunks)}): {e}")
             continue
+
+        returned_ids_chunk = set()
 
         for it in items:
             cid = it.get("id", "")
             if not cid:
                 continue
 
-            returned_ids.add(cid)
+            returned_ids_chunk.add(cid)
 
             snippet = it.get("snippet", {})
             stats = it.get("statistics", {})
@@ -403,16 +406,13 @@ def main() -> None:
 
             daily_rows_to_append.append([today_utc, cid, title, subs, views, videos])
 
-        # IDs demandés mais non retournés sur ce chunk
-        returned_ids_chunk = {it.get("id", "") for it in items if it.get("id")}
+        # ✅ NOT_FOUND: IDs demandés mais non retournés sur CE chunk
         missing_chunk = sorted(set(chunk) - returned_ids_chunk)
         if missing_chunk:
             log(f"Attention : IDs non retournés (chunk {idx}/{len(chunks)}) : {missing_chunk}")
             for cid in missing_chunk:
-                append_error_daily(
-                    snapshot_utc, today_utc, cid, "NOT_FOUND",
-                    "ID non retourné par l'API (typo, chaîne supprimée/privée, ou indisponible)."
-                )
+                append_error_daily(snapshot_utc, today_utc, cid, "NOT_FOUND",
+                                   "ID non retourné par l'API (typo, chaîne supprimée/privée, ou indisponible).")
 
     daily_header = ["date_utc", "channel_id", "channel_title", "subscribers", "views", "videos"]
     if daily_rows_to_append:
