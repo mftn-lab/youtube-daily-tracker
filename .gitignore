@@ -3,3 +3,7 @@ __pycache__/
 .env
 .venv/
 youtube_monthly_videos_snapshots_*.csv
+# --- Local runtime / backups ---
+.local_backup/
+data/daily/
+run_log.txt
