@@ -3,7 +3,7 @@ import csv
 import time
 import re
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Set, Tuple
+from typing import List, Dict, Any, Set, Tuple, Optional
 from pathlib import Path
 
 import requests
@@ -28,12 +28,14 @@ YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 # Paramètres de sélection
 RECENT_N = 20
-TOP_RECENT_N = 20
+TOP_VIEWED_N = 20          # (renommé: plus clair que TOP_RECENT_N)
 TOP_WINDOW_MONTHS = 12
 POOL_SIZE = 120
 
 # Dossier de sortie (1 fichier par mois)
 OUTPUT_DIR = Path("data") / "monthly"
+
+CSV_ENCODING = "utf-8-sig"
 
 FIELDS = [
     "snapshot_month",
@@ -58,12 +60,25 @@ ERROR_FIELDS = [
     "message",
 ]
 
-# Contrôle format d'un channelId (simple et efficace)
-CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{20,}$")
+# Regex stricte (comme ton daily)
+CHANNEL_ID_RE = re.compile(r"^UC[a-zA-Z0-9_-]{22}$")
 
 
 class YouTubeAPIError(RuntimeError):
     pass
+
+
+def safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except Exception:
+        return default
+
+
+def now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def get_api_key() -> str:
@@ -74,20 +89,43 @@ def get_api_key() -> str:
 
 
 def yt_get(endpoint: str, params: Dict[str, Any], retries: int = 3) -> Dict[str, Any]:
+    """
+    GET YouTube Data API avec retries raisonnables:
+    - Retry: 429, 5xx, timeouts
+    - 403 quota: remonte une erreur explicite
+    - 4xx (hors 429/403): considéré comme définitif
+    """
     api_key = get_api_key()
-
     url = f"{YOUTUBE_API_BASE}/{endpoint}"
+
     params = dict(params)
     params["key"] = api_key
 
-    last_err = None
+    last_err: Optional[str] = None
+
     for attempt in range(1, retries + 1):
         try:
             r = requests.get(url, params=params, timeout=30)
+
             if r.status_code == 200:
                 return r.json()
-            last_err = f"HTTP {r.status_code}: {r.text[:300]}"
-            time.sleep(1.5 ** attempt)
+
+            # 403: souvent quota / forbidden
+            if r.status_code == 403:
+                snippet = (r.text or "")[:300]
+                raise YouTubeAPIError(f"HTTP 403 (forbidden/quota?) sur {endpoint}: {snippet}")
+
+            # 429: rate limit, retry
+            if r.status_code == 429 or 500 <= r.status_code <= 599:
+                last_err = f"HTTP {r.status_code}: {(r.text or '')[:300]}"
+                # backoff simple
+                time.sleep(1.5 ** attempt)
+                continue
+
+            # autres 4xx : pas retry
+            last_err = f"HTTP {r.status_code}: {(r.text or '')[:300]}"
+            break
+
         except requests.RequestException as e:
             last_err = str(e)
             time.sleep(1.5 ** attempt)
@@ -100,17 +138,16 @@ def chunk(items: List[str], size: int) -> List[List[str]]:
 
 
 def validate_channel_ids(ids: List[str]) -> Tuple[List[str], List[Dict[str, Any]]]:
-    """Sépare les IDs valides des invalides (format)."""
+    """Sépare les IDs valides des invalides (format + doublons)."""
     valid: List[str] = []
     errors: List[Dict[str, Any]] = []
     seen: Set[str] = set()
 
-    for cid in ids:
-        cid = cid.strip()
+    for raw in ids:
+        cid = (raw or "").strip()
         if not cid:
             continue
 
-        # doublon exact
         if cid in seen:
             errors.append({
                 "channel_id": cid,
@@ -124,7 +161,7 @@ def validate_channel_ids(ids: List[str]) -> Tuple[List[str], List[Dict[str, Any]
             errors.append({
                 "channel_id": cid,
                 "error_type": "FORMAT_INVALID",
-                "message": "Format invalide (attendu: UC + caractères [A-Za-z0-9_-]).",
+                "message": "Format invalide (attendu: UC + 22 caractères [A-Za-z0-9_-]).",
             })
             continue
 
@@ -162,6 +199,7 @@ def playlist_items_limit(playlist_id: str, max_items: int) -> List[str]:
             params["pageToken"] = page_token
 
         data = yt_get("playlistItems", params)
+
         for it in data.get("items", []):
             vid = it.get("contentDetails", {}).get("videoId")
             if vid:
@@ -185,52 +223,47 @@ def videos_info(video_ids: List[str]) -> List[Dict[str, Any]]:
     return all_items
 
 
-def write_header(file_path: Path, fieldnames: List[str]):
+def atomic_write_csv(file_path: Path, fieldnames: List[str], rows: List[Dict[str, Any]]) -> None:
+    """
+    Écriture atomique: écrit dans un fichier temporaire puis remplace.
+    Évite les CSV partiels si le script crash.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+    tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+
+    with open(tmp_path, "w", encoding=CSV_ENCODING, newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
+        if rows:
+            w.writerows(rows)
+
+    tmp_path.replace(file_path)
 
 
-def append_rows(file_path: Path, fieldnames: List[str], rows: List[Dict[str, Any]]):
-    with open(file_path, "a", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
-        w.writerows(rows)
-
-
-def main():
-    snapshot_utc = datetime.now(timezone.utc).isoformat()
+def main() -> None:
+    snapshot_utc = now_utc_iso()
     snapshot_month = datetime.now(timezone.utc).strftime("%Y-%m")
     cutoff = datetime.now(timezone.utc) - relativedelta(months=TOP_WINDOW_MONTHS)
 
-    # Fichiers du mois
     output_csv = OUTPUT_DIR / f"videos_{snapshot_month}.csv"
     errors_csv = OUTPUT_DIR / f"errors_{snapshot_month}.csv"
-
-    # Overwrite + headers (idempotent)
-    write_header(output_csv, FIELDS)
-    write_header(errors_csv, ERROR_FIELDS)
 
     # 1) Validation format + doublons
     valid_ids, pre_errors = validate_channel_ids(CHANNEL_IDS)
 
-    # Prépare les erreurs avec dates
-    errors: List[Dict[str, Any]] = []
-    for e in pre_errors:
-        errors.append({
-            "snapshot_month": snapshot_month,
-            "snapshot_utc": snapshot_utc,
-            "channel_id": e["channel_id"],
-            "error_type": e["error_type"],
-            "message": e["message"],
-        })
+    errors: List[Dict[str, Any]] = [{
+        "snapshot_month": snapshot_month,
+        "snapshot_utc": snapshot_utc,
+        "channel_id": e["channel_id"],
+        "error_type": e["error_type"],
+        "message": e["message"],
+    } for e in pre_errors]
 
-    # 2) Récupérer les infos chaînes (uniquement celles au format OK)
+    # 2) channels.list pour metadata + uploads playlist
     meta: Dict[str, Dict[str, str]] = {}
     try:
         channels = channels_info(valid_ids)
     except Exception as ex:
-        # Si l'appel "channels" échoue totalement, on log et on arrête (sinon fichier vide)
         errors.append({
             "snapshot_month": snapshot_month,
             "snapshot_utc": snapshot_utc,
@@ -238,7 +271,8 @@ def main():
             "error_type": "API_ERROR",
             "message": f"Impossible de récupérer les chaînes (channels.list) : {ex}",
         })
-        append_rows(errors_csv, ERROR_FIELDS, errors)
+        atomic_write_csv(output_csv, FIELDS, [])          # fichier data vide mais valide
+        atomic_write_csv(errors_csv, ERROR_FIELDS, errors)
         print("[ERROR] L'API a échoué sur channels.list. Voir errors CSV.")
         print(f"Fichier erreurs: {errors_csv}")
         return
@@ -261,7 +295,7 @@ def main():
                 "message": f"Impossible de lire la playlist Uploads: {ex}",
             })
 
-    total_rows = 0
+    all_rows: List[Dict[str, Any]] = []
     ok_channels = 0
     warn_channels = 0
 
@@ -282,6 +316,7 @@ def main():
         channel_title = meta[cid]["title"]
         uploads_id = meta[cid]["uploads"]
 
+        # pool depuis Uploads
         try:
             pool_video_ids = playlist_items_limit(uploads_id, POOL_SIZE)
         except Exception as ex:
@@ -310,6 +345,7 @@ def main():
 
         recent_ids = pool_video_ids[:RECENT_N]
 
+        # infos sur le pool
         try:
             pool_videos = videos_info(pool_video_ids)
         except Exception as ex:
@@ -324,72 +360,83 @@ def main():
             print(f"[WARN] API videos.list(pool) failed: {cid}")
             continue
 
+        pool_by_id: Dict[str, Dict[str, Any]] = {v.get("id"): v for v in pool_videos if v.get("id")}
+
+        # top vues sur fenêtre (12 mois)
         candidates: List[Tuple[int, str]] = []
-        for v in pool_videos:
-            vid = v.get("id")
-            if not vid:
-                continue
+        for vid, v in pool_by_id.items():
             published_at = v.get("snippet", {}).get("publishedAt")
             if not published_at:
                 continue
-            if isoparse(published_at) < cutoff:
+            try:
+                if isoparse(published_at) < cutoff:
+                    continue
+            except Exception:
                 continue
-            views = int(v.get("statistics", {}).get("viewCount", 0))
+
+            views = safe_int(v.get("statistics", {}).get("viewCount", 0), default=0)
             candidates.append((views, vid))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
-        top_recent_ids = [vid for _, vid in candidates[:TOP_RECENT_N]]
+        top_viewed_ids = [vid for _, vid in candidates[:TOP_VIEWED_N]]
 
+        # dédup recent + top viewed
         selected: List[str] = []
-        seen: Set[str] = set()
-        for vid in recent_ids + top_recent_ids:
-            if vid and vid not in seen:
-                seen.add(vid)
+        seen_vids: Set[str] = set()
+        for vid in recent_ids + top_viewed_ids:
+            if vid and vid not in seen_vids:
+                seen_vids.add(vid)
                 selected.append(vid)
 
-        try:
-            selected_videos = videos_info(selected)
-        except Exception as ex:
-            warn_channels += 1
-            errors.append({
-                "snapshot_month": snapshot_month,
-                "snapshot_utc": snapshot_utc,
-                "channel_id": cid,
-                "error_type": "API_ERROR",
-                "message": f"Erreur API videos.list (selected): {ex}",
-            })
-            print(f"[WARN] API videos.list(selected) failed: {cid}")
-            continue
+        # on réutilise les data du pool autant que possible
+        selected_videos: List[Dict[str, Any]] = []
+        missing_selected: List[str] = [vid for vid in selected if vid not in pool_by_id]
 
-        rows: List[Dict[str, Any]] = []
+        selected_videos.extend([pool_by_id[vid] for vid in selected if vid in pool_by_id])
+
+        if missing_selected:
+            try:
+                extra = videos_info(missing_selected)
+                selected_videos.extend(extra)
+            except Exception as ex:
+                warn_channels += 1
+                errors.append({
+                    "snapshot_month": snapshot_month,
+                    "snapshot_utc": snapshot_utc,
+                    "channel_id": cid,
+                    "error_type": "API_ERROR",
+                    "message": f"Erreur API videos.list (selected-extra): {ex}",
+                })
+                print(f"[WARN] API videos.list(selected-extra) failed: {cid}")
+                continue
+
+        # lignes
         for v in selected_videos:
-            snippet = v.get("snippet", {})
-            stats = v.get("statistics", {})
-            cd = v.get("contentDetails", {})
+            snippet = v.get("snippet", {}) or {}
+            stats = v.get("statistics", {}) or {}
+            cd = v.get("contentDetails", {}) or {}
 
-            rows.append({
+            all_rows.append({
                 "snapshot_month": snapshot_month,
                 "snapshot_utc": snapshot_utc,
                 "channel_id": cid,
                 "channel_title": channel_title,
-                "video_id": v.get("id", ""),
-                "published_at": snippet.get("publishedAt", ""),
-                "title": snippet.get("title", ""),
-                "duration_iso8601": cd.get("duration", ""),
-                "category_id": snippet.get("categoryId", ""),
-                "view_count": stats.get("viewCount", ""),
-                "like_count": stats.get("likeCount", ""),
-                "comment_count": stats.get("commentCount", ""),
+                "video_id": v.get("id", "") or "",
+                "published_at": snippet.get("publishedAt", "") or "",
+                "title": snippet.get("title", "") or "",
+                "duration_iso8601": cd.get("duration", "") or "",
+                "category_id": snippet.get("categoryId", "") or "",
+                "view_count": stats.get("viewCount", "") or "",
+                "like_count": stats.get("likeCount", "") or "",
+                "comment_count": stats.get("commentCount", "") or "",
             })
 
-        append_rows(output_csv, FIELDS, rows)
-        total_rows += len(rows)
         ok_channels += 1
-        print(f"[OK] {channel_title} ({cid}) -> {len(rows)} vidéos")
+        print(f"[OK] {channel_title} ({cid}) -> {len(selected_videos)} vidéos")
 
-    # 4) Écrire le fichier d'erreurs (en une fois)
-    if errors:
-        append_rows(errors_csv, ERROR_FIELDS, errors)
+    # 4) Écriture atomique (données + erreurs)
+    atomic_write_csv(output_csv, FIELDS, all_rows)
+    atomic_write_csv(errors_csv, ERROR_FIELDS, errors)
 
     # Résumé final
     total_input = len(CHANNEL_IDS)
@@ -404,7 +451,7 @@ def main():
     print(f"Chaînes OK traitées: {ok_channels}")
     print(f"Chaînes en warning: {warn_channels}")
     print(f"NOT_FOUND (API): {total_not_found}")
-    print(f"Lignes ajoutées: {total_rows}")
+    print(f"Lignes écrites: {len(all_rows)}")
     print(f"Fichier données: {output_csv}")
     print(f"Fichier erreurs: {errors_csv}")
 
