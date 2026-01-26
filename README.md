@@ -43,8 +43,10 @@ This dataset is designed for:
 ### Monthly pipeline
 - A separate Python script runs **once per month**
 - For each channel:
-  - recent uploads are collected
-  - top-performing videos from the last 12 months are selected
+  - the **20 most recent uploaded videos** are collected
+  - the **20 top-performing videos** (by view count) from the **last 12 months** are selected
+  - results are **deduplicated** if a video appears in both groups
+- This produces a focused monthly snapshot (~30–40 videos per channel)
 - Video-level statistics are stored as a **monthly snapshot**
 - The script is idempotent and can be safely re-run
 
