@@ -55,7 +55,9 @@ jobs:
 
           git commit -m "chore: daily snapshot"
 
+          # Ensure clean working tree before pull --rebase
+          git reset --hard
+
           git pull --rebase
           git push
-
 
