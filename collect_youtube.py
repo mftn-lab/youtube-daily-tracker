@@ -35,73 +35,6 @@ API_KEY = os.getenv("YOUTUBE_API_KEY")
 PROJECT_DIR = Path(__file__).resolve().parent
 CHANNELS_REFERENCE_PATH = PROJECT_DIR / "channels_reference.csv"
 
-
-def load_channels_reference(path: Path) -> list[dict]:
-    if not path.exists():
-        raise FileNotFoundError(f"channels_reference.csv introuvable : {path}")
-
-    # Détection simple du séparateur (virgule ou point-virgule)
-    sample = path.read_text(encoding="utf-8", errors="replace")[:4096]
-    delimiter = "," if sample.count(",") >= sample.count(";") else ";"
-
-    with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f, delimiter=delimiter)
-        if not reader.fieldnames or "channel_id" not in reader.fieldnames:
-            raise ValueError("La colonne 'channel_id' est obligatoire dans channels_reference.csv")
-        return list(reader)
-
-
-def extract_channel_ids(rows: list[dict]) -> list[str]:
-    ids = []
-    seen = set()
-
-    for row in rows:
-        cid = (row.get("channel_id") or "").strip()
-        if cid and cid not in seen:
-            seen.add(cid)
-            ids.append(cid)
-
-    return ids
-
-
-CHANNEL_REFERENCE_ROWS = load_channels_reference(CHANNELS_REFERENCE_PATH)
-CHANNEL_IDS = extract_channel_ids(CHANNEL_REFERENCE_ROWS)
-
-
-PROJECT_DIR = Path(__file__).resolve().parent
-CHANNELS_REFERENCE_PATH = PROJECT_DIR / "channels_reference.csv"
-
-
-def load_channels_reference(path: Path) -> list[dict]:
-    if not path.exists():
-        raise FileNotFoundError(f"channels_reference.csv introuvable : {path}")
-
-    # Détection simple du séparateur (virgule ou point-virgule)
-    sample = path.read_text(encoding="utf-8", errors="replace")[:4096]
-    delimiter = "," if sample.count(",") >= sample.count(";") else ";"
-
-    with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f, delimiter=delimiter)
-        if not reader.fieldnames or "channel_id" not in reader.fieldnames:
-            raise ValueError("La colonne 'channel_id' est obligatoire dans channels_reference.csv")
-        return list(reader)
-
-
-def extract_channel_ids(rows: list[dict]) -> list[str]:
-    ids = []
-    seen = set()
-
-    for row in rows:
-        cid = (row.get("channel_id") or "").strip()
-        if cid and cid not in seen:
-            seen.add(cid)
-            ids.append(cid)
-
-    return ids
-
-
-CHANNEL_REFERENCE_ROWS = load_channels_reference(CHANNELS_REFERENCE_PATH)
-CHANNEL_IDS = extract_channel_ids(CHANNEL_REFERENCE_ROWS)
 # Fichiers de sortie
 DAILY_OUTFILE = "youtube_daily_snapshots.csv"
 REF_OUTFILE = "channels_reference.csv"
@@ -188,13 +121,60 @@ def validate_channel_ids(ids: List[str]) -> Tuple[List[str], List[str]]:
     return valid, invalid
 
 
+def load_channels_reference(path: Path) -> list[dict]:
+    """
+    Lit channels_reference.csv (source de vérité).
+    Supporte , ou ; + BOM éventuel.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"channels_reference.csv introuvable : {path}")
+
+    sample = path.read_text(encoding="utf-8", errors="replace")[:4096]
+    delimiter = "," if sample.count(",") >= sample.count(";") else ";"
+
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f, delimiter=delimiter)
+
+        if not reader.fieldnames:
+            raise ValueError("channels_reference.csv n'a pas d'entête.")
+
+        # Gestion BOM : "﻿channel_id" au lieu de "channel_id"
+        fieldnames = [fn.lstrip("\ufeff") for fn in reader.fieldnames]
+        if "channel_id" not in fieldnames:
+            raise ValueError("La colonne 'channel_id' est obligatoire dans channels_reference.csv")
+
+        rows = []
+        for row in reader:
+            cleaned = {}
+            for k, v in row.items():
+                if k is None:
+                    continue
+                cleaned[k.lstrip("\ufeff")] = v
+            rows.append(cleaned)
+        return rows
+
+
+def extract_channel_ids(rows: list[dict]) -> list[str]:
+    ids = []
+    seen = set()
+
+    for row in rows:
+        cid = (row.get("channel_id") or "").strip()
+        if cid and cid not in seen:
+            seen.add(cid)
+            ids.append(cid)
+
+    return ids
+
+
 def youtube_channels_api_call(channel_ids: List[str]) -> List[dict]:
     if not API_KEY:
         raise RuntimeError("Clé API manquante. Vérifie la variable d'environnement 'YOUTUBE_API_KEY'.")
 
     url = "https://www.googleapis.com/youtube/v3/channels"
     params = {
-        "part": "snippet,statistics",
+        # On ajoute contentDetails pour récupérer uploads_playlist_id
+        "part": "snippet,statistics,contentDetails",
         "id": ",".join(channel_ids),
         "key": API_KEY,
     }
@@ -244,12 +224,44 @@ def append_rows_csv(outfile: str, header: List[str], rows: List[List]) -> None:
         writer.writerows(rows)
 
 
-def upsert_reference(outfile: str, ref_rows: dict) -> None:
+def upsert_reference_full_schema(outfile: str, api_updates: dict) -> None:
+    """
+    Met à jour channels_reference.csv (schéma complet) sans écraser les colonnes manuelles.
+
+    Auto (écrasable/actualisé par le script) :
+    - channel_title
+    - custom_url
+    - channel_url
+    - country
+    - channel_published_at
+    - uploads_playlist_id
+    - last_seen_utc
+
+    Manuel (conservé tel quel) :
+    - language
+    - tags
+    - notes
+    """
+
+    fieldnames = [
+        "channel_id",
+        "channel_title",
+        "custom_url",
+        "channel_url",
+        "country",
+        "language",
+        "tags",
+        "notes",
+        "channel_published_at",
+        "uploads_playlist_id",
+        "last_seen_utc",
+    ]
+
     existing = {}
 
     if os.path.isfile(outfile):
         try:
-            with open(outfile, "r", newline="", encoding=CSV_ENCODING) as f:
+            with open(outfile, "r", encoding=CSV_ENCODING, newline="") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     cid = (row.get("channel_id") or "").strip()
@@ -258,20 +270,33 @@ def upsert_reference(outfile: str, ref_rows: dict) -> None:
         except Exception as e:
             log(f"Warning : impossible de lire {outfile} (reference) : {e}")
 
-    for cid, data in ref_rows.items():
-        existing[cid] = data
+    for cid, api in api_updates.items():
+        old = existing.get(cid, {})
 
-    header = ["channel_id", "channel_title", "channel_url", "last_seen_utc"]
-    with open(outfile, "w", newline="", encoding=CSV_ENCODING) as f:
-        writer = csv.DictWriter(f, fieldnames=header)
+        existing[cid] = {
+            "channel_id": cid,
+            "channel_title": api.get("channel_title", old.get("channel_title", "")),
+            "custom_url": api.get("custom_url", old.get("custom_url", "")),
+            "channel_url": api.get("channel_url", old.get("channel_url", f"https://www.youtube.com/channel/{cid}")),
+            "country": api.get("country", old.get("country", "")),
+
+            # Manuels : on garde toujours l'existant
+            "language": old.get("language", ""),
+            "tags": old.get("tags", ""),
+            "notes": old.get("notes", ""),
+
+            "channel_published_at": api.get("channel_published_at", old.get("channel_published_at", "")),
+            "uploads_playlist_id": api.get("uploads_playlist_id", old.get("uploads_playlist_id", "")),
+            "last_seen_utc": api.get("last_seen_utc", old.get("last_seen_utc", "")),
+        }
+
+    with open(outfile, "w", encoding=CSV_ENCODING, newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for cid in sorted(existing.keys()):
-            writer.writerow({
-                "channel_id": existing[cid].get("channel_id", cid),
-                "channel_title": existing[cid].get("channel_title", ""),
-                "channel_url": existing[cid].get("channel_url", f"https://www.youtube.com/channel/{cid}"),
-                "last_seen_utc": existing[cid].get("last_seen_utc", ""),
-            })
+            # garantit que toutes les clés existent
+            row = {k: (existing[cid].get(k, "") or "") for k in fieldnames}
+            writer.writerow(row)
 
 
 def main() -> None:
@@ -285,7 +310,11 @@ def main() -> None:
 
     init_errors_daily_file()
 
-    valid_ids, invalid_ids = validate_channel_ids(CHANNEL_IDS)
+    # Charge les IDs depuis le référentiel CSV (source de vérité)
+    ref_rows = load_channels_reference(CHANNELS_REFERENCE_PATH)
+    channel_ids = extract_channel_ids(ref_rows)
+
+    valid_ids, invalid_ids = validate_channel_ids(channel_ids)
     valid_ids = list(dict.fromkeys(valid_ids))  # dédup en conservant l'ordre
 
     if invalid_ids:
@@ -294,7 +323,7 @@ def main() -> None:
             append_error_daily(snapshot_utc, today_utc, bad, "FORMAT_INVALID", "Channel ID format invalide (typo probable).")
 
     if not valid_ids:
-        raise RuntimeError("Aucun Channel ID valide. Renseigne au moins une chaîne (UC...).")
+        raise RuntimeError("Aucun Channel ID valide. Ajoute au moins une chaîne (UC...) dans channels_reference.csv.")
 
     existing_keys = load_existing_daily_keys(DAILY_OUTFILE)
     chunks = chunk_list(valid_ids, MAX_IDS_PER_REQUEST)
@@ -325,23 +354,36 @@ def main() -> None:
 
             returned_ids_chunk.add(cid)
 
-            snippet = it.get("snippet", {})
-            stats = it.get("statistics", {})
+            snippet = it.get("snippet", {}) or {}
+            stats = it.get("statistics", {}) or {}
+            content_details = it.get("contentDetails", {}) or {}
+            related = (content_details.get("relatedPlaylists", {}) or {})
 
-            title = snippet.get("title", "")
+            title = snippet.get("title", "") or ""
+            custom_url = snippet.get("customUrl", "") or ""
+            country = snippet.get("country", "") or ""
+            channel_published_at = snippet.get("publishedAt", "") or ""
+            uploads_playlist_id = related.get("uploads", "") or ""
+
             url = f"https://www.youtube.com/channel/{cid}"
 
             subs = safe_int(stats.get("subscriberCount"), default=0)
             views = safe_int(stats.get("viewCount"), default=0)
             videos = safe_int(stats.get("videoCount"), default=0)
 
+            # Données pour mise à jour du référentiel (schéma complet)
             ref_updates[cid] = {
                 "channel_id": cid,
                 "channel_title": title,
+                "custom_url": custom_url,
                 "channel_url": url,
+                "country": country,
+                "channel_published_at": channel_published_at,
+                "uploads_playlist_id": uploads_playlist_id,
                 "last_seen_utc": now_utc,
             }
 
+            # Daily : anti-doublon (une fois par jour et par chaîne)
             if (today_utc, cid) in existing_keys:
                 continue
 
@@ -364,9 +406,10 @@ def main() -> None:
     else:
         log("Aucune nouvelle ligne à ajouter (peut-être déjà collecté aujourd'hui).")
 
+    # Mise à jour du référentiel complet (sans écraser language/tags/notes)
     if ref_updates:
-        upsert_reference(REF_OUTFILE, ref_updates)
-        log(f"Référence mise à jour : {len(ref_updates)} chaînes (titre + URL)")
+        upsert_reference_full_schema(REF_OUTFILE, ref_updates)
+        log(f"Référence mise à jour : {len(ref_updates)} chaînes (schéma complet)")
     else:
         log("Référence non modifiée (aucune chaîne retournée).")
 
