@@ -28,139 +28,80 @@ import requests
 
 API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-# IMPORTANT : ici uniquement des Channel IDs (format UC...)
-CHANNEL_IDS = [
-    "UCGMxP4yf3ixAAEKQc3d76gw",
-    "UC1wV5Kf18gVbL3bWH-tWKDw",
-    "UC7XxmEXw7wXgh259vYCSjkQ",
-    "UCZEdNvDcHUPEE7CDRpXnO6w",
-    "UCZ5qxuvquQABNtjcawNMowA",
-    "UCxpT79bmhxk50l8P50WG86w",
-    "UCrSCIeCW1YuEviVZPVhEfGQ",
-    "UCOyUCj6Wx9skJggzZFUDZyA",
-    "UCFrfK9IFqO15S7C52DdnSog",
-    "UCJy0lX8ThZ7lCtst7JnegWQ",
-    "UCljgvfi_NnUrNJVHp_HGHwA",
-    "UCqRSWOqkW_oelrdUN7KQ-aQ",
-    "UCaHolOYkfcTdC0vTFAywzXw",
-    "UCDfGCQqgOKPYeiaG3I4vl4w",
-    "UCTOAKgwfqqCbOytF3RNGGVw",
-    "UCwsQtHFlS-LKVn8xJ3TaupQ",
-    "UCu6HC8ahaPWqqfSvic7nWyQ",
-    "UCC5xS4j2xUyGO2UfjFh5LsQ",
-    "UCNOUTy_TWRJzAaSfIGserkg",
-    "UCgjhIdz3Uw9r-eMyML9M8FA",
-    "UCPQsSFJurluaMOG1qL0Y7sA",
-    "UCfLyhjpn3hzleNtgTGOQimA",
-    "UC-pdFydi9ooxEfATh3KoiIw",
-    "UCaybrunQi8xWgPMgv1AYBHw",
-    "UC4q3HKdMqzll3SvA2Lf7oAg",
-    "UC6joDErOGcFJC1vHNSfsYQg",
-    "UCoJ4gzwVvGNH5GNqiJoQAAA",
-    "UC_dzE9mydhQuQ0NwmXByDtA",
-    "UCm3QK_QNta9Mue2Q70gtzVw",
-    "UCQsb5TqYUeGWGpJFr8DMWsQ",
-    "UCe7R7Pt-bxNT7EE83NLsmFQ",
-    "UCXJ_vW2t0W5hY9hS8ePnpzw",
-    "UCQZa27_VXLUowoMsYo6Y0Dw",
-    "UCZsEJw8rwd0RWAga5dulOpg",
-    "UCiR9chjo9kIFMsCXgspFxqg",
-    "UCGjKSSIpN7aYQluu04kPrsA",
-    "UCflWJq4cTuofmM-0G-GMUNQ",
-    "UCrsiHZzr4IjuSjnvPy5rVUQ",
-    "UCuDNiVxL-Zfw0CBVQ4oOr8w",
-    "UCTmHRe6W96WgYlUNxcokpVQ",
-    "UCkS6jlQ4RJTCdkzVCU2-FSQ",
-    "UCSYFVeBI66YqDhGrYKxiCUQ",
-    "UCBqYyDusSFntU7k2UnFGsBA",
-    "UCCUlTcDhcn72O8TiNfFJWWA",
-    "UC1N4EIilrmXhTEdu3h7tpPg",
-    "UCA_DfRJwb5U0S4UiiH3BtUg",
-    "UC2lMzO7HzJ_jamFT762vfwA",
-    "UCQigF3tZJJlt6o1_tkYKkNQ",
-    "UCYmw-Y8TnRzO4COTBKEgUGg",
-    "UCBOGe_x7aqQV4Ly5Rfa4iow",
-    "UCfbwndxvM8tOtxN_GqU1R3Q",
-    "UCySZIa8Y4e6aSVg4CISXAOA",
-    "UCdqC1GnhKs3aQw6j62uOvUw",
-    "UCX4A8obrGg1iX37R-fyBJ6w",
-    "UCUD3E77YRTGK3yPSDB6Kq5Q",
-    "UCVrceZhsV6TRyVh3VhBFaKA",
-    "UCUltPy138RvnbWX_FuUHtDA",
-    "UCwZsbPUXohCN867pQzioGLw",
-    "UCc7giV0qHsCNbhjV3_ZJ22w",
-    "UCf-DN6QjyyEbhuMWCoXdXQQ",
-    "UCB32y6dm508Hap4_Mn-ZnHQ",
-    "UCB0ffaItcXwkgbVu8Hvq3Tw",
-    "UCtPzJInyqqt__Tn0EaUlaAw",
-    "UClQPWod8Gjgw7i51t7PYibQ",
-    "UC5HtcZa4-moyfy6NTY7GHwA",
-    "UCs7Jg5KBsgiova4CrseuwIw",
-    "UCUT9pQQGw4ZEpv5hqrv-bZw",
-    "UCUclUivgBePqnqDGQ3Jzu2Q",
-    "UC2HXhqg87yIWz152Ig9vkaQ",
-    "UCNzUonmxxvG-HIqOC3S7Thw",
-    "UCagQpz-WZtgbSp8Ry0XQ4Yw",
-    "UCUbwQOAmLdZ9zPOOPFt25zQ",
-    "UClnRNkdVq24iwIbc1O-hjlw",
-    "UC69qClfvKeB9WeyySg5iQrQ",
-    "UCpaI1FRY8EGK6mEAL7Wfr9w",
-    "UCEPqgSzHj7vlJj5pGX9dDdA",
-    "UCOtM8pxxBIfwqu6e8mHgUEQ",
-    "UCJ4p_F-vCnEn5V5OtFN8Q3w",
-    "UCJ3MlRSjtv2sT-rIDsFg0fw",
-    "UCRI5foOTNz6DuVz3SVQ1cMA",
-    "UCb0sWM7tMRaEgn_hpptqnxA",
-    "UCssuk5-zaZn9vt0_HNj-Hug",
-    "UCUanZckNyJODHBdqtMzYMpA",
-    "UCzICpbabqKwBTpb9XlWerjA",
-    "UCa8Leo9o5Nnb-Cc1sWfT2HQ",
-    "UCM6kUx3GI7lTQlqMBiumaEg",
-    "UC65OszX3C9oYfNLU5AWjwYg",
-    "UC1WIj7YGywcVoRLS0zZu2RQ",
-    "UCR-4Ge4NbqILG5HTTvs_nFQ",
-    "UCJPa4sr9B_mLjShfHhWi8yg",
-    "UC_FckuJiPXwA_nOEIoTsRZg",
-    "UCQvNFAufGf8mtN2_L8thysg",
-    "UCMWAxO0xGJxELkiX5_pEJNA",
-    "UCU8_onYYhNxwGUB3hA34C4Q",
-    "UC0AFqXyYs1z2Dxx5jtQBicQ",
-    "UCrwtkeoBxPfhyde5eesmvyA",
-    "UCP5-zNhWXk_LUPIJpxtrTnQ",
-    "UCDBYphtxNDXGQe5eyHYZ6Fw",
-    "UC7rdUip5Q8R7Ki1haNbdwwg",
-    "UCuE3ei3NOnVjQUefjHUCF5Q",
-    "UCAOjk3Po21_t7L1MDHQ4-Og",
-    "UCA25ZdZZF5XE6ihPE5pwfnw",
-    "UCTER7XOnDvSRbI2YxikLaVw",
-    "UCMc7IaTDRDtxftK9v0aXVqA",
-    "UCU_a5aoj_HzTMohx0JG_Z4A",
-    "UC3-dl8nKItitMxM9DNTDAfQ",
-    "UCHJb6-VCrzQqVQASN23OskQ",
-    "UC69gruQfEHEQ4Qme0liJOdw",
-    "UCOm_kuKVb4ImX_DHpIgX_zg",
-    "UCDY3WI0HqdzNADtE6B-BmUw",
-    "UCpFq62uOig4n9jT3luIYUDQ",
-    "UCIaNSaws_Wv_eoUAmDbUK-Q",
-    "UCOaX4zvPzmv0eBbUWOOOB_A",
-    "UCURjynFkZicGPbIIaWO9vmQ",
-    "UCHGvOgxAA_MFOH1yyhjcR-Q",
-    "UCz6PEeVLG1TL6jMRTvSLm4g",
-    "UCbwE_k9zALnzZRvkoyDhuzw",
-    "UCr7ZVUNJ9KyYD92xqfinGsQ",
-    "UC6jfhJWEAfako0XlKnA2UGQ",
-    "UCJLKCYMkCbOW9wzmeUj8dwQ",
-    "UCrAiXFptzDmgQA6gUCOz9RQ",
-    "UCchpwieM3DswmDEnJ0MRq1A",
-    "UCNWE4ouC-BxzJ-Lomuuqb1Q",
-    "UCR3uoYsbRO_S0wg2DaSlb8g",
-    "UCPP-NkzSqMJ9ywhJkcgrpAw",
-    "UCrHCRJPuJJcINMMEETEYt4g",
-    "UC70eSjnRIGvRLCzT6K0SQSg",
-    "UCpSRz-eAoiSW5kaHpI_3LjA",
-    "UCQSA6pCffm7epqxFqouL0Xg",
-    "UCOCoKBUmALR6d7UW_s5zgrA",
-]
+# ------------------------------------------------------------
+# Référentiel des chaînes (CSV = source de vérité)
+# ------------------------------------------------------------
+
+PROJECT_DIR = Path(__file__).resolve().parent
+CHANNELS_REFERENCE_PATH = PROJECT_DIR / "channels_reference.csv"
+
+
+def load_channels_reference(path: Path) -> list[dict]:
+    if not path.exists():
+        raise FileNotFoundError(f"channels_reference.csv introuvable : {path}")
+
+    # Détection simple du séparateur (virgule ou point-virgule)
+    sample = path.read_text(encoding="utf-8", errors="replace")[:4096]
+    delimiter = "," if sample.count(",") >= sample.count(";") else ";"
+
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f, delimiter=delimiter)
+        if not reader.fieldnames or "channel_id" not in reader.fieldnames:
+            raise ValueError("La colonne 'channel_id' est obligatoire dans channels_reference.csv")
+        return list(reader)
+
+
+def extract_channel_ids(rows: list[dict]) -> list[str]:
+    ids = []
+    seen = set()
+
+    for row in rows:
+        cid = (row.get("channel_id") or "").strip()
+        if cid and cid not in seen:
+            seen.add(cid)
+            ids.append(cid)
+
+    return ids
+
+
+CHANNEL_REFERENCE_ROWS = load_channels_reference(CHANNELS_REFERENCE_PATH)
+CHANNEL_IDS = extract_channel_ids(CHANNEL_REFERENCE_ROWS)
+
+
+PROJECT_DIR = Path(__file__).resolve().parent
+CHANNELS_REFERENCE_PATH = PROJECT_DIR / "channels_reference.csv"
+
+
+def load_channels_reference(path: Path) -> list[dict]:
+    if not path.exists():
+        raise FileNotFoundError(f"channels_reference.csv introuvable : {path}")
+
+    # Détection simple du séparateur (virgule ou point-virgule)
+    sample = path.read_text(encoding="utf-8", errors="replace")[:4096]
+    delimiter = "," if sample.count(",") >= sample.count(";") else ";"
+
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f, delimiter=delimiter)
+        if not reader.fieldnames or "channel_id" not in reader.fieldnames:
+            raise ValueError("La colonne 'channel_id' est obligatoire dans channels_reference.csv")
+        return list(reader)
+
+
+def extract_channel_ids(rows: list[dict]) -> list[str]:
+    ids = []
+    seen = set()
+
+    for row in rows:
+        cid = (row.get("channel_id") or "").strip()
+        if cid and cid not in seen:
+            seen.add(cid)
+            ids.append(cid)
+
+    return ids
+
+
+CHANNEL_REFERENCE_ROWS = load_channels_reference(CHANNELS_REFERENCE_PATH)
+CHANNEL_IDS = extract_channel_ids(CHANNEL_REFERENCE_ROWS)
 # Fichiers de sortie
 DAILY_OUTFILE = "youtube_daily_snapshots.csv"
 REF_OUTFILE = "channels_reference.csv"
