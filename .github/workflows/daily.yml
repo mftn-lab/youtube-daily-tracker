@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -35,15 +37,16 @@ jobs:
       - name: Run YouTube collector
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        run: python collect_youtube.py
+        run: |
+          python collect_youtube.py
 
-            - name: Commit CSV files if changed
+      - name: Commit CSV files if changed
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          # Stage only expected outputs (avoid failing if missing)
-          git add youtube_daily_snapshots.csv channels_reference.csv 2>/dev/null || true
+          git add youtube_daily_snapshots.csv || true
+          git add channels_reference.csv || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
@@ -52,7 +55,7 @@ jobs:
 
           git commit -m "chore: daily snapshot"
 
-          # Rebase on top of remote to avoid non-fast-forward failures
           git pull --rebase
           git push
+
 
