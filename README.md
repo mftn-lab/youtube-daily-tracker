@@ -1,128 +1,215 @@
 # youtube-daily-tracker
 
 Automated YouTube data collection project focused on **applied tech content**  
-(daily channel statistics + monthly video-level snapshots).
+(daily channel time-series + monthly video-level performance snapshots).
 
 ---
 
 ## 📌 Project overview
 
-This project automatically collects and maintains structured datasets from a curated list of
-**tech-focused YouTube channels** (hardware, software, desk setups, productivity tools, applied AI,
-networking, peripherals).
+This project builds and maintains a **clean, reproducible and growing dataset**
+from a curated list of **tech-focused YouTube channels**  
+(hardware, software, productivity tools, desk setups, applied AI, peripherals).
 
-The goal is to build a **clean, reliable and growing historical dataset** based on real-world tech
-usage — not hype or generic trends.
+The objective is **data quality and longitudinal analysis**, not short-term trends
+or viral noise.
 
 This dataset is designed for:
 - time-series analysis of channel growth
 - comparison of audience dynamics across tech creators
-- video-level performance analysis (monthly snapshots)
-- data analysis projects and portfolio demonstrations
+- video-level performance analysis
+- data analysis / data engineering portfolio projects
 - future client-oriented YouTube analytics use cases
 
 ---
 
 ## 🧠 Project philosophy
 
-- Focus on **practical tech usage**, not viral or speculative content
+- Focus on **practical tech usage**, not hype or speculative content
 - Prefer **robust, reproducible pipelines** over one-off scripts
-- Separate **daily time-series tracking** from **monthly deep snapshots**
-- Keep data structures simple, auditable and analysis-ready
+- Clearly separate **daily time-series tracking** from **monthly deep snapshots**
+- Keep data structures **simple, auditable and analysis-ready**
+- Treat data files as **products**, not temporary artifacts
+
+---
+
+## ⚙️ High-level architecture
+
+```text
+channels_reference.xlsx   → manual edit (Excel)
+           ↓ export
+channels_reference.csv    → source of truth (versioned)
+           ↓
+collect_youtube.py        → daily channel-level snapshots
+monthly_videos_snapshot.py→ monthly video-level snapshots
+```
+
+This architecture deliberately separates:
+- **human-friendly input** (Excel)
+- **versioned source of truth** (CSV)
+- **automated data pipelines** (Python)
+
+Each layer has a **single responsibility**, which keeps the system robust and easy to evolve.
+
+---
+
+## 📘 Channels reference (source of truth)
+
+### channels_reference.xlsx (local, not versioned)
+
+- Used for **manual editing**:
+  - adding new channels (only `channel_id` is required)
+  - adding personal annotations or notes
+- Human-friendly format (Excel)
+- This file is **not tracked by Git**
+
+Typical workflow:
+- add or remove channel IDs
+- add optional notes
+- export to CSV
+
+---
+
+### channels_reference.csv (versioned)
+
+- **Single source of truth**
+- Tracked in Git
+- Read by both daily and monthly pipelines
+- Automatically enriched and updated by scripts
+
+Only the `channel_id` column is mandatory.  
+All other fields are filled or updated automatically during pipeline runs.
+
+Automatically managed fields include:
+- channel_title
+- channel_url
+- custom_url
+- country
+- uploads_playlist_id
+- channel_published_at
+- last_seen_utc
 
 ---
 
 ## ⚙️ How it works
 
-### Daily pipeline
-- A curated list of **YouTube Channel IDs** is maintained in the project
-- A Python script queries the YouTube Data API (`channels.list`)
-- A GitHub Actions workflow runs **once per day (UTC)**
-- One snapshot per channel per day is appended (anti-duplicate logic)
+### 🟢 Daily pipeline (channel-level time series)
 
-### Monthly pipeline
-- A separate Python script runs **once per month**
+- Reads `channels_reference.csv`
+- Validates channel IDs (format and duplicates)
+- Queries the YouTube Data API (`channels.list`)
+- Runs **once per day (UTC)** via GitHub Actions
+- Appends **one row per channel per day**
+- Safe to re-run (anti-duplicate logic)
+
+Built-in features:
+- retry logic and API error handling
+- structured daily error logs
+- safe upsert of channel metadata
+
+**Outputs**
+- `youtube_daily_snapshots.csv`
+- `data/daily/errors_daily.csv`
+
+---
+
+### 🔵 Monthly pipeline (video-level snapshot)
+
+- Runs **once per month**
 - For each channel:
-  - the **20 most recent uploaded videos** are collected
-  - the **20 top-performing videos** (by view count) from the **last 12 months** are selected
-  - results are **deduplicated** if a video appears in both groups
-- This produces a focused monthly snapshot (~30–40 videos per channel)
-- Video-level statistics are stored as a **monthly snapshot**
-- The script is idempotent and can be safely re-run
+  - collects the **20 most recent uploaded videos**
+  - selects the **20 most viewed videos** from the **last 12 months**
+  - deduplicates overlapping videos
+- Results in ~30–40 videos per channel
+- Uses **atomic writes** to prevent partial files
+
+**Outputs**
+- `data/monthly/videos_YYYY-MM.csv`
+- `data/monthly/errors_YYYY-MM.csv`
 
 ---
 
 ## 📂 Data outputs
 
 ### Daily datasets
-- `youtube_daily_snapshots.csv`  
-  Daily channel-level statistics (time-series):
+
+- `youtube_daily_snapshots.csv`
+  - date (UTC)
+  - channel_id
+  - channel_title
   - subscribers
   - total views
   - video count
 
-- `channels_reference.csv`  
-  Reference table:
-  - channel ID
-  - channel name
-  - channel URL
-  - last seen timestamp
+- `channels_reference.csv`
+  - channel metadata (ID, title, URL, country, uploads playlist, last seen, etc.)
+
+---
 
 ### Monthly datasets
-- `data/monthly/videos_YYYY-MM.csv`  
-  Monthly video-level snapshot including:
-  - video metadata (title, publish date, duration)
-  - engagement metrics (views, likes, comments)
-  - channel association
 
-- `data/monthly/errors_YYYY-MM.csv`  
-  Monthly error log (empty when runs are successful)
+- `data/monthly/videos_YYYY-MM.csv`
+  - snapshot month and timestamp
+  - channel ID and title
+  - video ID
+  - publish date
+  - title
+  - duration
+  - category ID
+  - view count
+  - like count
+  - comment count
+
+- `data/monthly/errors_YYYY-MM.csv`
+  - structured error log
+  - API errors
+  - missing data
+  - invalid or unavailable channels
 
 ---
 
 ## 🤖 Automation
 
-- GitHub Actions handles:
+- GitHub Actions handle:
   - daily scheduled runs
   - monthly scheduled runs
   - manual execution (`workflow_dispatch`)
-- Commits are performed **only if data has changed**
-- Python version and dependencies are pinned for stability
+- Commits occur **only if data has changed**
+- Python version and dependencies are pinned
+- Pipelines are **idempotent and safe to re-run**
 
 ---
 
 ## ▶️ Run locally
 
-### Daily collection
+Daily collection:
+
 ```bash
 pip install -r requirements.txt
 python collect_youtube.py
 ```
 
-### Monthly snapshot
+Monthly snapshot:
+
 ```bash
 pip install -r requirements.txt
 python monthly_videos_snapshot.py
 ```
 
-YouTube API credentials must be provided via the environment variable:
-```bash
-YOUTUBE_API_KEY=your_api_key_here
-```
+Environment variable required:
+YOUTUBE_API_KEY (YouTube Data API v3 key)
 
----
-
-## 📊 Typical use cases
-
-- Long-term growth analysis of tech YouTube channels
-- Monthly comparison of video performance across creators
-- Dataset for Python / Pandas / Power BI analysis
-- Foundation for future YouTube analytics tooling
 
 ---
 
 ## 🚧 Notes
 
-- This project is intentionally **data-first** (no UI layer)
-- CSV outputs are designed to be easily ingested into analysis tools
-- Structure may evolve as new analytical needs emerge
+- This project is intentionally **data-first**
+- No UI layer by design
+- CSV outputs are analysis-ready (Pandas, Power BI, SQL, etc.)
+- The structure may evolve as analytical needs grow
+- API keys and secrets are **never committed** to the repository
+
+
+
+
