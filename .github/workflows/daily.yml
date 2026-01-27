@@ -37,12 +37,13 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: python collect_youtube.py
 
-      - name: Commit CSV files if changed
+            - name: Commit CSV files if changed
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git add youtube_daily_snapshots.csv channels_reference.csv
+          # Stage only expected outputs (avoid failing if missing)
+          git add youtube_daily_snapshots.csv channels_reference.csv 2>/dev/null || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
@@ -50,4 +51,8 @@ jobs:
           fi
 
           git commit -m "chore: daily snapshot"
+
+          # Rebase on top of remote to avoid non-fast-forward failures
+          git pull --rebase
           git push
+
