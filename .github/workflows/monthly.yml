@@ -2,7 +2,7 @@ name: Monthly Videos Snapshot
 
 on:
   schedule:
-    - cron: "30 3 1 * *"  # le 1er de chaque mois à 03:30 UTC
+    - cron: "30 3 1 * *"  # Le 1er de chaque mois à 03:30 UTC
   workflow_dispatch:
 
 permissions:
@@ -15,11 +15,13 @@ concurrency:
 jobs:
   run-monthly-snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -35,14 +37,15 @@ jobs:
       - name: Run monthly snapshot
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        run: python monthly_videos_snapshot.py
+        run: |
+          python monthly_videos_snapshot.py
 
-      - name: Commit and push results if changed
+      - name: Commit monthly CSV files if changed
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git add data/monthly/*.csv
+          git add data/monthly/*.csv || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
@@ -50,4 +53,9 @@ jobs:
           fi
 
           git commit -m "chore: monthly videos snapshot"
+
+          # Ensure clean working tree before syncing
+          git reset --hard
+
+          git pull --rebase
           git push
