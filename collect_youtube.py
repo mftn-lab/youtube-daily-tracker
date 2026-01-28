@@ -249,9 +249,6 @@ def upsert_reference_full_schema(outfile: str, api_updates: dict) -> None:
         "custom_url",
         "channel_url",
         "country",
-        "language",
-        "tags",
-        "notes",
         "channel_published_at",
         "uploads_playlist_id",
         "last_seen_utc",
@@ -279,12 +276,6 @@ def upsert_reference_full_schema(outfile: str, api_updates: dict) -> None:
             "custom_url": api.get("custom_url", old.get("custom_url", "")),
             "channel_url": api.get("channel_url", old.get("channel_url", f"https://www.youtube.com/channel/{cid}")),
             "country": api.get("country", old.get("country", "")),
-
-            # Manuels : on garde toujours l'existant
-            "language": old.get("language", ""),
-            "tags": old.get("tags", ""),
-            "notes": old.get("notes", ""),
-
             "channel_published_at": api.get("channel_published_at", old.get("channel_published_at", "")),
             "uploads_playlist_id": api.get("uploads_playlist_id", old.get("uploads_playlist_id", "")),
             "last_seen_utc": api.get("last_seen_utc", old.get("last_seen_utc", "")),
