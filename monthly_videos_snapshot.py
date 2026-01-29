@@ -3,7 +3,7 @@ import csv
 import time
 import re
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Set, Tuple, Optional
+from typing import List, Dict, Any, Tuple
 from pathlib import Path
 
 import requests
@@ -11,7 +11,7 @@ from dateutil.parser import isoparse
 from dateutil.relativedelta import relativedelta
 
 # ------------------------------------------------------------
-# Monthly Videos Snapshot (robust)
+# Monthly Videos Snapshot (hardened)
 #
 # Objectif :
 # - Lire channels_reference.csv (source de vérité)
@@ -22,10 +22,11 @@ from dateutil.relativedelta import relativedelta
 # - Écrit 1 fichier par mois : data/monthly/videos_YYYY-MM.csv (overwrite)
 # - Journalise les problèmes : data/monthly/errors_YYYY-MM.csv
 #
-# Notes :
-# - Utilise uploads_playlist_id quand disponible (moins de quota API)
-# - Fallback API si uploads_playlist_id manquant
-# - Écriture atomique (pas de CSV corrompu)
+# Renforcements :
+# - try/except par chaîne (le run ne casse plus)
+# - validation uploads_playlist_id + fallback API
+# - logs erreurs plus précis (API/playlist/videos)
+# - aucune KeyError (accès dict safe)
 # ------------------------------------------------------------
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
@@ -39,7 +40,6 @@ POOL_SIZE = 120
 # Fichiers
 CHANNELS_REFERENCE_CSV = Path("channels_reference.csv")
 OUTPUT_DIR = Path("data") / "monthly"
-
 CSV_ENCODING = "utf-8-sig"
 
 FIELDS = [
@@ -66,6 +66,7 @@ ERROR_FIELDS = [
 ]
 
 CHANNEL_ID_RE = re.compile(r"^UC[a-zA-Z0-9_-]{22}$")
+UPLOADS_PLAYLIST_RE = re.compile(r"^UU[a-zA-Z0-9_-]{22}$")  # uploads playlist id
 
 
 class YouTubeAPIError(RuntimeError):
@@ -132,6 +133,17 @@ def chunk(items: List[str], size: int) -> List[List[str]]:
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
+def add_error(errors: List[Dict[str, Any]], snapshot_month: str, snapshot_utc: str,
+              channel_id: str, error_type: str, message: str) -> None:
+    errors.append({
+        "snapshot_month": snapshot_month,
+        "snapshot_utc": snapshot_utc,
+        "channel_id": channel_id,
+        "error_type": error_type,
+        "message": message,
+    })
+
+
 # ------------------------------------------------------------
 # Chargement du référentiel
 # ------------------------------------------------------------
@@ -176,6 +188,8 @@ def validate_channel_ids(ids: List[str]) -> Tuple[List[str], List[Dict[str, str]
     seen = set()
 
     for cid in ids:
+        cid = (cid or "").strip()
+
         if cid in seen:
             errors.append({"channel_id": cid, "error_type": "DUPLICATE_ID", "message": "ID dupliqué"})
             continue
@@ -195,19 +209,22 @@ def validate_channel_ids(ids: List[str]) -> Tuple[List[str], List[Dict[str, str]
 # ------------------------------------------------------------
 
 def channels_info(ids: List[str]) -> List[Dict[str, Any]]:
-    items = []
+    items: List[Dict[str, Any]] = []
     for batch in chunk(ids, 50):
         data = yt_get("channels", {"part": "snippet,contentDetails", "id": ",".join(batch)})
         items.extend(data.get("items", []))
     return items
 
 
-def get_uploads_playlist_id(ch: Dict[str, Any]) -> str:
-    return ch["contentDetails"]["relatedPlaylists"]["uploads"]
+def safe_get_uploads_playlist_id(ch: Dict[str, Any]) -> str:
+    try:
+        return (ch.get("contentDetails", {}) or {}).get("relatedPlaylists", {}).get("uploads", "") or ""
+    except Exception:
+        return ""
 
 
 def playlist_items_limit(playlist_id: str, max_items: int) -> List[str]:
-    vids = []
+    vids: List[str] = []
     token = None
 
     while len(vids) < max_items:
@@ -222,7 +239,7 @@ def playlist_items_limit(playlist_id: str, max_items: int) -> List[str]:
         data = yt_get("playlistItems", params)
 
         for it in data.get("items", []):
-            vid = it.get("contentDetails", {}).get("videoId")
+            vid = (it.get("contentDetails", {}) or {}).get("videoId")
             if vid:
                 vids.append(vid)
 
@@ -234,7 +251,7 @@ def playlist_items_limit(playlist_id: str, max_items: int) -> List[str]:
 
 
 def videos_info(video_ids: List[str]) -> List[Dict[str, Any]]:
-    items = []
+    items: List[Dict[str, Any]] = []
     for batch in chunk(video_ids, 50):
         data = yt_get("videos", {"part": "snippet,contentDetails,statistics", "id": ",".join(batch)})
         items.extend(data.get("items", []))
@@ -271,105 +288,167 @@ def main() -> None:
 
     valid_ids, pre_errors = validate_channel_ids([c["channel_id"] for c in channels])
 
-    errors = [{
-        "snapshot_month": snapshot_month,
-        "snapshot_utc": snapshot_utc,
-        "channel_id": e["channel_id"],
-        "error_type": e["error_type"],
-        "message": e["message"],
-    } for e in pre_errors]
+    errors: List[Dict[str, Any]] = []
+    for e in pre_errors:
+        add_error(errors, snapshot_month, snapshot_utc, e["channel_id"], e["error_type"], e["message"])
 
     ref_by_id = {c["channel_id"]: c for c in channels}
-    meta: Dict[str, Dict[str, str]] = {}
-    missing_api = []
 
+    # meta[cid] = {"title": "...", "uploads": "..."}
+    meta: Dict[str, Dict[str, str]] = {}
+
+    # 1) Take uploads_playlist_id from reference if valid
+    missing_api: List[str] = []
     for cid in valid_ids:
         r = ref_by_id.get(cid, {})
-        if r.get("uploads_playlist_id"):
-            meta[cid] = {
-                "title": r.get("channel_title", ""),
-                "uploads": r["uploads_playlist_id"],
-            }
+        title = (r.get("channel_title") or "").strip()
+        uploads = (r.get("uploads_playlist_id") or "").strip()
+
+        if uploads and UPLOADS_PLAYLIST_RE.match(uploads):
+            meta[cid] = {"title": title, "uploads": uploads}
         else:
+            # uploads absent ou invalide -> fallback API
             missing_api.append(cid)
 
+    # 2) Fallback: fetch channels info for missing uploads/title
     if missing_api:
-        for ch in channels_info(missing_api):
-            cid = ch.get("id")
+        try:
+            api_items = channels_info(missing_api)
+        except Exception as e:
+            # Si l'API plante ici, on log et on tentera quand même la suite (mais beaucoup seront NOT_FOUND)
+            for cid in missing_api:
+                add_error(errors, snapshot_month, snapshot_utc, cid, "API_ERROR", f"channels.list failed: {e}")
+            api_items = []
+
+        returned = set()
+        for ch in api_items:
+            cid = (ch.get("id") or "").strip()
             if not cid:
                 continue
-            meta[cid] = {
-                "title": ch.get("snippet", {}).get("title", ""),
-                "uploads": get_uploads_playlist_id(ch),
-            }
+            returned.add(cid)
 
-    rows = []
+            title = ((ch.get("snippet", {}) or {}).get("title") or "").strip()
+            uploads = safe_get_uploads_playlist_id(ch).strip()
 
+            if not uploads:
+                add_error(errors, snapshot_month, snapshot_utc, cid, "UPLOADS_MISSING",
+                          "uploads playlist id missing in API response")
+                continue
+            if not UPLOADS_PLAYLIST_RE.match(uploads):
+                add_error(errors, snapshot_month, snapshot_utc, cid, "UPLOADS_INVALID",
+                          f"uploads playlist id invalid: {uploads}")
+                continue
+
+            meta[cid] = {"title": title, "uploads": uploads}
+
+        # IDs non retournés -> NOT_FOUND
+        for cid in missing_api:
+            if cid not in returned and cid not in meta:
+                add_error(errors, snapshot_month, snapshot_utc, cid, "NOT_FOUND",
+                          "Chaîne non retournée par l'API (channels.list)")
+
+    rows: List[Dict[str, Any]] = []
+
+    # 3) Per-channel processing (never crash the run)
     for cid in valid_ids:
         if cid not in meta:
-            errors.append({
-                "snapshot_month": snapshot_month,
-                "snapshot_utc": snapshot_utc,
-                "channel_id": cid,
-                "error_type": "NOT_FOUND",
-                "message": "Chaîne non retournée par l'API",
-            })
+            # déjà loggé (NOT_FOUND / UPLOADS_MISSING etc.)
             continue
 
-        uploads_id = meta[cid]["uploads"]
-        channel_title = meta[cid]["title"]
+        try:
+            uploads_id = meta[cid]["uploads"]
+            channel_title = meta[cid]["title"]
 
-        pool_ids = playlist_items_limit(uploads_id, POOL_SIZE)
-        pool_videos = videos_info(pool_ids)
-        by_id = {v["id"]: v for v in pool_videos if v.get("id")}
-
-        recent = pool_ids[:RECENT_N]
-
-        candidates = []
-        for vid, v in by_id.items():
+            # a) Build pool from uploads playlist
             try:
-                if isoparse(v["snippet"]["publishedAt"]) < cutoff:
+                pool_ids = playlist_items_limit(uploads_id, POOL_SIZE)
+            except Exception as e:
+                add_error(errors, snapshot_month, snapshot_utc, cid, "PLAYLIST_ERROR", f"playlistItems failed: {e}")
+                continue
+
+            if not pool_ids:
+                add_error(errors, snapshot_month, snapshot_utc, cid, "EMPTY_UPLOADS",
+                          "No videos returned from uploads playlist")
+                continue
+
+            # b) Fetch video details for pool
+            try:
+                pool_videos = videos_info(pool_ids)
+            except Exception as e:
+                add_error(errors, snapshot_month, snapshot_utc, cid, "VIDEOS_ERROR", f"videos.list failed: {e}")
+                continue
+
+            by_id = {v.get("id"): v for v in pool_videos if v.get("id")}
+
+            # c) Recent (playlist is ordered by recency)
+            recent = pool_ids[:RECENT_N]
+
+            # d) Top viewed within last 12 months
+            candidates: List[Tuple[int, str]] = []
+            for vid, v in by_id.items():
+                if not vid:
                     continue
-            except Exception:
-                continue
-            candidates.append((safe_int(v["statistics"].get("viewCount")), vid))
+                try:
+                    published_at = (v.get("snippet", {}) or {}).get("publishedAt", "")
+                    if not published_at:
+                        continue
+                    if isoparse(published_at) < cutoff:
+                        continue
+                except Exception:
+                    continue
 
-        candidates.sort(reverse=True)
-        top = [vid for _, vid in candidates[:TOP_VIEWED_N]]
+                views = safe_int((v.get("statistics", {}) or {}).get("viewCount"), default=0)
+                candidates.append((views, vid))
 
-        selected = []
-        seen = set()
-        for vid in recent + top:
-            if vid not in seen:
-                seen.add(vid)
-                selected.append(vid)
+            candidates.sort(reverse=True)
+            top = [vid for _, vid in candidates[:TOP_VIEWED_N]]
 
-        for vid in selected:
-            v = by_id.get(vid)
-            if not v:
-                continue
+            # e) Dedup preserve order
+            selected: List[str] = []
+            seen: set = set()
+            for vid in recent + top:
+                if vid and vid not in seen:
+                    seen.add(vid)
+                    selected.append(vid)
 
-            rows.append({
-                "snapshot_month": snapshot_month,
-                "snapshot_utc": snapshot_utc,
-                "channel_id": cid,
-                "channel_title": channel_title,
-                "video_id": vid,
-                "published_at": v["snippet"].get("publishedAt", ""),
-                "title": v["snippet"].get("title", ""),
-                "duration_iso8601": v["contentDetails"].get("duration", ""),
-                "category_id": v["snippet"].get("categoryId", ""),
-                "view_count": v["statistics"].get("viewCount", ""),
-                "like_count": v["statistics"].get("likeCount", ""),
-                "comment_count": v["statistics"].get("commentCount", ""),
-            })
+            # f) Emit rows
+            for vid in selected:
+                v = by_id.get(vid)
+                if not v:
+                    continue
+
+                sn = v.get("snippet", {}) or {}
+                cd = v.get("contentDetails", {}) or {}
+                st = v.get("statistics", {}) or {}
+
+                rows.append({
+                    "snapshot_month": snapshot_month,
+                    "snapshot_utc": snapshot_utc,
+                    "channel_id": cid,
+                    "channel_title": channel_title,
+                    "video_id": vid,
+                    "published_at": sn.get("publishedAt", "") or "",
+                    "title": sn.get("title", "") or "",
+                    "duration_iso8601": cd.get("duration", "") or "",
+                    "category_id": sn.get("categoryId", "") or "",
+                    "view_count": safe_int(st.get("viewCount"), default=0),
+                    "like_count": safe_int(st.get("likeCount"), default=0),
+                    "comment_count": safe_int(st.get("commentCount"), default=0),
+                })
+
+        except Exception as e:
+            # Catch-all per channel
+            add_error(errors, snapshot_month, snapshot_utc, cid, "UNEXPECTED_ERROR", str(e))
+            continue
 
     atomic_write_csv(output_csv, FIELDS, rows)
     atomic_write_csv(errors_csv, ERROR_FIELDS, errors)
 
     print(f"[OK] Monthly snapshot écrit : {output_csv}")
     print(f"[OK] Erreurs : {errors_csv}")
+    print(f"[OK] Chaînes valides (format) : {len(valid_ids)}")
     print(f"[OK] Vidéos collectées : {len(rows)}")
+    print(f"[OK] Erreurs loggées : {len(errors)}")
 
 
 if __name__ == "__main__":
