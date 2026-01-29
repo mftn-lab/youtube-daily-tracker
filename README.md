@@ -226,7 +226,7 @@ Recommended workflow when adding a new channel:
 3. Paste the `channel_id` into `channels_reference.xlsx`
 4. Export to `channels_reference.csv`
 5. Run the daily collector:
-   ```bash
+```bash
    python collect_youtube.py
 ```
 
