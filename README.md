@@ -38,7 +38,7 @@ This dataset is designed for:
 ```text
 channels_reference.xlsx   → manual edit (Excel)
            ↓ export
-channels_reference.csv    → source of truth (versioned)
+channels_reference.csv    → source of truth (tracked locally, not committed)
            ↓
 collect_youtube.py        → daily channel-level snapshots
 monthly_videos_snapshot.py→ monthly video-level snapshots
@@ -210,6 +210,36 @@ YOUTUBE_API_KEY (YouTube Data API v3 key)
 - The structure may evolve as analytical needs grow
 - API keys and secrets are **never committed** to the repository
 
+---
 
+## ✅ How to add a new channel safely
+
+This project enforces **server-side validation** of all YouTube channel IDs to
+guarantee data integrity.
+
+Recommended workflow when adding a new channel:
+
+1. Open the YouTube channel page (or one of its videos)
+2. Use the provided bookmarklet to:
+   - copy the **Channel ID (UC...)**
+   - visually confirm the **official channel name**
+3. Paste the `channel_id` into `channels_reference.xlsx`
+4. Export to `channels_reference.csv`
+5. Run the daily collector:
+   ```bash
+   python collect_youtube.py
+```
+
+During the run:
+- Channel IDs are validated against the **YouTube Data API**
+- Invalid formats are rejected
+- Non-existing channels are flagged as `missing`
+- Valid channels are cached as `ok` to avoid repeated checks
+
+Validation cache:
+- `data/daily/channels_validation_cache.csv`
+- Used only as a runtime optimization (not committed)
+
+This ensures that **only real, existing YouTube channels** enter the dataset.
 
 
