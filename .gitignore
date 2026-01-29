@@ -2,25 +2,25 @@
 __pycache__/
 *.pyc
 
-# --- Environments ---
+# --- Environments / secrets ---
 .env
 .venv/
 
-# --- Local runtime / backups ---
-.local_backup/
-data/daily/
+# --- Runtime & logs ---
 run_log.txt
-channels_reference.csv
+
+# --- Data outputs (generated) ---
+data/
 youtube_daily_snapshots.csv
 
-# --- Excel local (édition manuelle) ---
+# --- Local reference data (source privée) ---
+channels_reference.csv
 channels_reference.xlsx
-
-# Backups manuels
 channels_reference_backup.csv
 
-# Archives temporaires
+# --- Local backups / temp ---
+.local_backup/
 archive/
 
-# Excel temp files
+# --- Excel temp files ---
 ~$*.xlsx
