@@ -10,7 +10,8 @@ __pycache__/
 run_log.txt
 
 # --- Data outputs (generated) ---
-data/
+data/daily/
+data/monthly/
 youtube_daily_snapshots.csv
 
 # --- Local reference data (source privée) ---
