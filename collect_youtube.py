@@ -391,6 +391,16 @@ def upsert_reference_full_schema(outfile: str, api_updates: dict) -> None:
     - notes
     """
 
+    def pick(*vals: str) -> str:
+        """Retourne la première valeur non vide (non None, non '')."""
+        for v in vals:
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s != "":
+                return s
+        return ""
+
     fieldnames = [
         "channel_id",
         "channel_title",
@@ -406,7 +416,8 @@ def upsert_reference_full_schema(outfile: str, api_updates: dict) -> None:
 
     if os.path.isfile(outfile):
         try:
-            with open(outfile, "r", encoding=CSV_ENCODING, newline="") as f:
+            # Lecture en utf-8-sig pour gérer le BOM proprement
+            with open(outfile, "r", encoding="utf-8-sig", newline="") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     cid = (row.get("channel_id") or "").strip()
@@ -419,13 +430,17 @@ def upsert_reference_full_schema(outfile: str, api_updates: dict) -> None:
         old = existing.get(cid, {})
         existing[cid] = {
             "channel_id": cid,
-            "channel_title": api.get("channel_title", old.get("channel_title", "")),
-            "custom_url": api.get("custom_url", old.get("custom_url", "")),
-            "channel_url": api.get("channel_url", old.get("channel_url", f"https://www.youtube.com/channel/{cid}")),
-            "country": api.get("country", old.get("country", "")),
-            "channel_published_at": api.get("channel_published_at", old.get("channel_published_at", "")),
-            "uploads_playlist_id": api.get("uploads_playlist_id", old.get("uploads_playlist_id", "")),
-            "last_seen_utc": api.get("last_seen_utc", old.get("last_seen_utc", "")),
+            "channel_title": pick(api.get("channel_title"), old.get("channel_title")),
+            "custom_url": pick(api.get("custom_url"), old.get("custom_url")),
+            "channel_url": pick(
+                api.get("channel_url"),
+                old.get("channel_url"),
+                f"https://www.youtube.com/channel/{cid}",
+            ),
+            "country": pick(api.get("country"), old.get("country")),
+            "channel_published_at": pick(api.get("channel_published_at"), old.get("channel_published_at")),
+            "uploads_playlist_id": pick(api.get("uploads_playlist_id"), old.get("uploads_playlist_id")),
+            "last_seen_utc": pick(api.get("last_seen_utc"), old.get("last_seen_utc")),
         }
 
     with open(outfile, "w", encoding=CSV_ENCODING, newline="") as f:
