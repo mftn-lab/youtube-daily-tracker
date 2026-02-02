@@ -243,3 +243,146 @@ Validation cache:
 This ensures that **only real, existing YouTube channels** enter the dataset.
 
 
+---
+
+## 🧩 Data model — Channel classification
+
+This project relies on a **channel-level classification model** used to enrich
+and segment YouTube channels for analysis purposes.
+
+The classification is designed to be:
+- stable over time
+- analytically meaningful
+- orthogonal across dimensions
+- simple to maintain manually
+
+> **Note**  
+> The channel classification table is maintained **locally in Excel** for analysis purposes  
+> and is **not included nor versioned in this repository**.  
+> This section documents the **data model and classification logic**, not the data itself.
+
+---
+
+## 🎯 Design principles
+
+The data model follows a few strict principles:
+
+- Each axis represents **one independent analytical dimension**
+- Axes are **orthogonal** (no overlap in meaning)
+- Classification is done at the **channel level**, not per video
+- Tags reflect **dominant patterns**, not edge cases
+- The model favors **long-term comparability** over exhaustiveness
+
+---
+
+## 🧱 Model overview
+
+Each YouTube channel is described using the following axes:
+
+| Axis | Dimension | Column name | Required |
+|----|----------|-------------|----------|
+| Axis 1 | Incarnation | `incarnation` | Yes |
+| Axis 2 | Main topic | `topic_main` | Yes |
+| Axis 2 | Secondary topic | `topic_secondary` | No |
+| Axis 3 | Content angle | `content_angle` | Yes |
+| Axis 4 | Aesthetic / branding | `aesthetic` | No |
+| Axis 5 | Positioning | `positioning` | Yes |
+
+---
+
+## 🧍 Axis 1 — Incarnation
+
+**Purpose**  
+Describes the **perceived human presence on screen**.
+
+**Allowed values**
+```
+incarnated
+voice_only
+faceless
+ai_generated
+b_roll
+```
+---
+
+## 🧠 Axis 2 — Topic
+
+**Purpose**  
+Describes **what the channel is mainly about**, from an analytical perspective.
+
+**Rules**
+- One main topic is mandatory
+- One secondary topic is optional
+- Maximum two topics per channel
+
+**Allowed values**
+```
+hardware
+software
+ai
+consumer_electronics
+apple
+tech_news
+productivity
+tech_lifestyle
+creative_tools
+```
+---
+
+## 🎥 Axis 3 — Content angle
+
+**Purpose**  
+Describes **how the content is primarily approached**.
+
+**Allowed values**
+```
+reviews
+comparisons
+tutorials
+explainers
+opinions
+use_cases
+benchmarks
+setup_desk
+```
+---
+
+## 🎨 Axis 4 — Aesthetic / branding (optional)
+
+**Purpose**  
+Describes the **dominant visual identity** of the channel.
+
+**Allowed values**
+```
+minimalist
+cinematic
+clean
+dark
+lifestyle
+tech_focus
+```
+---
+
+## 🧭 Axis 5 — Positioning
+
+**Purpose**  
+Describes the **structural nature of the channel**.
+
+**Allowed values**
+```
+solo_creator
+team_channel
+media_brand
+company_brand
+educational_channel
+```
+---
+
+## 🔒 Model stability
+
+This data model is intentionally **limited and stable**.
+
+New axes or tags should only be introduced if they provide **clear analytical value**
+and do not compromise long-term comparability.
+
+The goal is to keep the model valid across multiple years of data collection and analysis.
