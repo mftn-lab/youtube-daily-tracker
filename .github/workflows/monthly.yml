@@ -45,7 +45,10 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git add data/monthly/*.csv || true
+          # Toujours se synchroniser AVANT de créer un commit
+          git pull --rebase
+
+          git add data/monthly/*.csv
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
@@ -53,9 +56,4 @@ jobs:
           fi
 
           git commit -m "chore: monthly videos snapshot"
-
-          # Ensure clean working tree before syncing
-          git reset --hard
-
-          git pull --rebase
           git push

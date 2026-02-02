@@ -11,8 +11,12 @@ run_log.txt
 
 # --- Data outputs (generated) ---
 data/daily/
-data/monthly/
 youtube_daily_snapshots.csv
+
+# --- Monthly snapshots (versionnés) ---
+!data/
+!data/monthly/
+!data/monthly/*.csv
 
 # --- Local reference data (source privée) ---
 channels_reference.csv
