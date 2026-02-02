@@ -61,6 +61,7 @@ MAX_RETRIES = 3
 RETRY_SLEEP_SECONDS = 2
 
 # Encodage homogène CSV (Excel-friendly)
+# -> utf-8-sig gère le BOM à l'écriture (Excel) ET à la lecture (si on l'utilise)
 CSV_ENCODING = "utf-8-sig"
 
 
@@ -69,7 +70,8 @@ def log(msg: str) -> None:
     line = f"[{stamp}] {msg}"
     print(line)
     try:
-        with open(LOGFILE, "a", encoding="utf-8") as f:
+        # Cohérence avec le reste (Excel/Windows friendly)
+        with open(LOGFILE, "a", encoding=CSV_ENCODING) as f:
             f.write(line + "\n")
     except Exception:
         pass
@@ -184,36 +186,51 @@ def validate_channel_ids(ids: List[str]) -> Tuple[List[str], List[str]]:
     return valid, invalid
 
 
+def _detect_delimiter(sample: str) -> str:
+    """Détecte , ou ; de façon simple et robuste."""
+    return "," if sample.count(",") >= sample.count(";") else ";"
+
+
 def load_channels_reference(path: Path) -> list[dict]:
     """
     Lit channels_reference.csv (source de vérité).
-    Supporte , ou ; + BOM éventuel.
+
+    Robuste :
+    - Supporte , ou ;
+    - Supporte BOM UTF-8 (Excel) via utf-8-sig
+    - Normalise les noms de colonnes et les clés (strip + suppression BOM)
     """
     if not path.exists():
         raise FileNotFoundError(f"channels_reference.csv introuvable : {path}")
 
-    sample = path.read_text(encoding="utf-8", errors="replace")[:4096]
-    delimiter = "," if sample.count(",") >= sample.count(";") else ";"
+    # Lire un échantillon en utf-8-sig pour neutraliser le BOM éventuel
+    sample = path.read_text(encoding="utf-8-sig", errors="replace")[:4096]
+    delimiter = _detect_delimiter(sample)
 
-    with path.open("r", encoding="utf-8", newline="") as f:
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f, delimiter=delimiter)
 
         if not reader.fieldnames:
             raise ValueError("channels_reference.csv n'a pas d'entête.")
 
-        # Gestion BOM : "﻿channel_id" au lieu de "channel_id"
-        fieldnames = [fn.lstrip("\ufeff") for fn in reader.fieldnames]
-        if "channel_id" not in fieldnames:
-            raise ValueError("La colonne 'channel_id' est obligatoire dans channels_reference.csv")
+        normalized_fieldnames = [fn.lstrip("\ufeff").strip() for fn in reader.fieldnames if fn]
 
-        rows = []
+        if "channel_id" not in normalized_fieldnames:
+            raise ValueError(
+                "La colonne 'channel_id' est obligatoire dans channels_reference.csv "
+                f"(trouvé: {normalized_fieldnames})"
+            )
+
+        rows: list[dict] = []
         for row in reader:
-            cleaned = {}
-            for k, v in row.items():
+            cleaned: dict = {}
+            for k, v in (row or {}).items():
                 if k is None:
                     continue
-                cleaned[k.lstrip("\ufeff")] = v
+                nk = k.lstrip("\ufeff").strip()
+                cleaned[nk] = v
             rows.append(cleaned)
+
         return rows
 
 
@@ -222,7 +239,8 @@ def extract_channel_ids(rows: list[dict]) -> list[str]:
     seen: set = set()
 
     for row in rows:
-        cid = (row.get("channel_id") or "").strip()
+        # Support au cas où une ligne aurait encore une clé BOM
+        cid = (row.get("channel_id") or row.get("\ufeffchannel_id") or "").strip()
         if cid and cid not in seen:
             seen.add(cid)
             ids.append(cid)
