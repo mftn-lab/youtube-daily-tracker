@@ -29,3 +29,7 @@ archive/
 
 # --- Excel temp files ---
 ~$*.xlsx
+
+# --- Local cleanup / one-off scripts ---
+channels_reference_backup_*.csv
+dedupe_channels_reference.py
