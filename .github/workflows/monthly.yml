@@ -29,21 +29,43 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Commit monthly CSV files if changed
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure git user
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          # Rebase propre même si le script a déjà modifié des fichiers
-          git pull --rebase --autostash
+      # ✅ Se synchroniser AVANT de générer/commiter
+      - name: Sync with remote (rebase)
+        run: |
+          git pull --rebase
 
-          git add data/monthly/*.csv
+      - name: Run monthly videos snapshot
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: |
+          python monthly_videos_snapshot.py
+
+      - name: Commit monthly snapshot if changed (locked)
+        run: |
+          # 🔒 On ignore toute modification accidentelle de la référence / daily
+          git restore --worktree channels_reference.csv || true
+          git restore --worktree youtube_daily_snapshots.csv || true
+
+          # 🔒 Verrouillage : on ne commit QUE le mois courant (UTC)
+          MONTH=$(date -u +%Y-%m)
+
+          git add "data/monthly/videos_${MONTH}.csv" || true
+          git add "data/monthly/errors_${MONTH}.csv" || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
           fi
 
-          git commit -m "chore: monthly videos snapshot"
+          git commit -m "chore: monthly videos snapshot (${MONTH})"
           git push
-
