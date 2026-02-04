@@ -13,6 +13,8 @@ from a curated list of **tech-focused YouTube channels**
 
 The objective is **data quality and longitudinal analysis**, not short-term trends
 or viral noise.
+> This project was built to support **long-term, comparative analysis** of tech creators,  
+> not short-lived trend tracking or viral performance monitoring.
 
 This dataset is designed for:
 - time-series analysis of channel growth
@@ -20,6 +22,21 @@ This dataset is designed for:
 - video-level performance analysis
 - data analysis / data engineering portfolio projects
 - future client-oriented YouTube analytics use cases
+
+## 🔐 Data integrity guarantees
+
+This project enforces strict guarantees:
+
+- daily and monthly datasets are append-only (no in-place mutation)
+- no duplicate channel entries (hard-stop validation)
+- one daily snapshot per channel per day
+- immutable historical data (append-only)
+- monthly snapshots never overwrite previous months
+- failed API calls never partially corrupt datasets
+- line endings normalized across platforms (LF)
+
+The pipeline is designed to **fail early rather than silently corrupt data**.
+
 
 ---
 
@@ -71,6 +88,11 @@ Typical workflow:
 ---
 
 ### channels_reference.csv (versioned)
+> ⚠️ **Controlled reference dataset**  
+> Although `channels_reference.csv` is versioned, it is treated as a **controlled reference dataset**.  
+> Automated workflows **never introduce new channel IDs** and only update **metadata fields**.  
+> All **structural changes** (adding/removing channels, deduplication) are performed **manually via Excel**.
+
 
 - **Single source of truth**
 - Tracked in Git
@@ -385,4 +407,7 @@ This data model is intentionally **limited and stable**.
 New axes or tags should only be introduced if they provide **clear analytical value**
 and do not compromise long-term comparability.
 
-The goal is to keep the model valid across multiple years of data collection and analysis.
+The goal is to keep the model valid across multiple years of data collection and analysis
+
+This repository prioritizes **consistency, traceability and long-term analytical value**
+over short-term flexibility or rapid iteration.
