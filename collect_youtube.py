@@ -2,9 +2,11 @@ import os
 import csv
 import time
 import re
+import io
 from datetime import datetime, timezone
 from typing import List, Tuple, Set
 from pathlib import Path
+from collections import Counter
 
 import requests
 
@@ -70,7 +72,6 @@ def log(msg: str) -> None:
     line = f"[{stamp}] {msg}"
     print(line)
     try:
-        # Cohérence avec le reste (Excel/Windows friendly)
         with open(LOGFILE, "a", encoding=CSV_ENCODING) as f:
             f.write(line + "\n")
     except Exception:
@@ -203,7 +204,6 @@ def load_channels_reference(path: Path) -> list[dict]:
     if not path.exists():
         raise FileNotFoundError(f"channels_reference.csv introuvable : {path}")
 
-    # Lire un échantillon en utf-8-sig pour neutraliser le BOM éventuel
     sample = path.read_text(encoding="utf-8-sig", errors="replace")[:4096]
     delimiter = _detect_delimiter(sample)
 
@@ -239,13 +239,49 @@ def extract_channel_ids(rows: list[dict]) -> list[str]:
     seen: set = set()
 
     for row in rows:
-        # Support au cas où une ligne aurait encore une clé BOM
         cid = (row.get("channel_id") or row.get("\ufeffchannel_id") or "").strip()
         if cid and cid not in seen:
             seen.add(cid)
             ids.append(cid)
 
     return ids
+
+
+def assert_channels_reference_strict(rows: list[dict]) -> None:
+    """
+    Sécurité hard-stop:
+    - stop si channel_id manquant / vide
+    - stop si doublons de channel_id
+    - warning si format non standard
+    """
+    raw_ids: list[str] = []
+    empty_count = 0
+
+    for row in rows:
+        cid = (row.get("channel_id") or row.get("\ufeffchannel_id") or "").strip()
+        if not cid:
+            empty_count += 1
+            continue
+        raw_ids.append(cid)
+
+    if empty_count:
+        raise SystemExit(f"[FATAL] channels_reference.csv: {empty_count} ligne(s) avec channel_id vide.")
+
+    counts = Counter(raw_ids)
+    dups = [cid for cid, c in counts.items() if c > 1]
+    if dups:
+        sample = ", ".join(dups[:10])
+        raise SystemExit(
+            f"[FATAL] channels_reference.csv: {len(dups)} channel_id en doublon (ex: {sample}). "
+            "Corrige le fichier (un channel_id = une ligne) puis relance."
+        )
+
+    pattern = re.compile(r"^UC[a-zA-Z0-9_-]{22}$")
+    bad = [cid for cid in raw_ids if not pattern.match(cid)]
+    if bad:
+        print(f"[WARN] channels_reference.csv: {len(bad)} channel_id au format non standard (ex: {bad[:5]}).")
+
+    print(f"[OK] channels_reference.csv strict check: {len(raw_ids)} IDs, 0 doublon, 0 vide")
 
 
 def youtube_channels_api_call(channel_ids: List[str]) -> List[dict]:
@@ -286,17 +322,15 @@ def validate_channel_ids_server(
     - garde uniquement les IDs réellement retournés par l'API (existants)
     - met en cache ok/missing
     - évite de retaper l'API pour les IDs déjà validés ok
-    - si erreur API sur un chunk : chunk ignoré (mode strict) + log API_ERROR
+    - si erreur API sur un chunk : chunk ignoré + log API_ERROR
     """
     cache = load_validation_cache()
 
-    # Garder ceux déjà OK en cache
     server_ok_ids: List[str] = []
     for cid in candidate_ids:
         if cache.get(cid, {}).get("status") == "ok":
             server_ok_ids.append(cid)
 
-    # Vérifier uniquement ceux pas OK
     to_check = [cid for cid in candidate_ids if cache.get(cid, {}).get("status") != "ok"]
 
     if not to_check:
@@ -350,14 +384,11 @@ def validate_channel_ids_server(
                 "Validation serveur: ID non retourné par l'API (typo, chaîne supprimée/privée).",
             )
 
-        # Ajouter les IDs validés (ordre initial conservé)
         for cid in chunk:
             if cid in returned_ids:
                 server_ok_ids.append(cid)
 
     save_validation_cache(cache)
-
-    # Dédup en conservant l'ordre
     return list(dict.fromkeys(server_ok_ids))
 
 
@@ -390,27 +421,21 @@ def append_rows_csv(outfile: str, header: List[str], rows: List[List]) -> None:
         writer.writerows(rows)
 
 
-def upsert_reference_full_schema(outfile: str, api_updates: dict) -> None:
+def upsert_reference_full_schema(outfile: str, api_updates: dict) -> bool:
     """
     Met à jour channels_reference.csv (schéma complet) sans écraser les colonnes manuelles.
 
-    Auto (écrasable/actualisé par le script) :
-    - channel_title
-    - custom_url
-    - channel_url
-    - country
-    - channel_published_at
-    - uploads_playlist_id
-    - last_seen_utc
+    ✅ Anti-noise (robuste) :
+    - construit le CSV via csv.DictWriter (quoting fiable)
+    - normalise les fins de lignes (CRLF/LF)
+    - n'écrit le fichier QUE si le contenu change (sinon -> aucun commit inutile)
 
-    Manuel (conservé tel quel) :
-    - language
-    - tags
-    - notes
+    Retourne:
+      - True si le fichier a été écrit (changement réel)
+      - False si inchangé
     """
 
     def pick(*vals: str) -> str:
-        """Retourne la première valeur non vide (non None, non '')."""
         for v in vals:
             if v is None:
                 continue
@@ -430,11 +455,10 @@ def upsert_reference_full_schema(outfile: str, api_updates: dict) -> None:
         "last_seen_utc",
     ]
 
-    existing = {}
+    existing: dict = {}
 
     if os.path.isfile(outfile):
         try:
-            # Lecture en utf-8-sig pour gérer le BOM proprement
             with open(outfile, "r", encoding="utf-8-sig", newline="") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
@@ -461,17 +485,46 @@ def upsert_reference_full_schema(outfile: str, api_updates: dict) -> None:
             "last_seen_utc": pick(api.get("last_seen_utc"), old.get("last_seen_utc")),
         }
 
-    with open(outfile, "w", encoding=CSV_ENCODING, newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for cid in sorted(existing.keys()):
-            row = {k: (existing[cid].get(k, "") or "") for k in fieldnames}
-            writer.writerow(row)
+    # --- Build CSV content in-memory (stable order) ---
+    buf = io.StringIO(newline="\n")
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+
+    for cid in sorted(existing.keys()):
+        row = {k: (existing[cid].get(k, "") or "") for k in fieldnames}
+        # nettoyer retours ligne dans champs
+        for k in row:
+            row[k] = str(row[k]).replace("\r", " ").replace("\n", " ").strip()
+        writer.writerow(row)
+
+    new_content = buf.getvalue()
+
+    # --- Read old content + normalize (CRLF/LF) ---
+    old_content = ""
+    if os.path.isfile(outfile):
+        try:
+            with open(outfile, "r", encoding=CSV_ENCODING, newline="") as f:
+                old_content = f.read()
+        except Exception:
+            old_content = ""
+
+    def _norm(s: str) -> str:
+        return (s or "").replace("\r\n", "\n").replace("\r", "\n")
+
+    if _norm(new_content) == _norm(old_content):
+        log("Référence inchangée (aucune écriture).")
+        return False
+
+    # --- Write deterministically ---
+    with open(outfile, "w", encoding=CSV_ENCODING, newline="\n") as f:
+        f.write(new_content)
+
+    return True
 
 
 def main() -> None:
     today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now_utc = today_utc  # ✅ stable sur la journée -> évite les commits inutiles
     snapshot_utc = datetime.now(timezone.utc).isoformat()
 
     log("=== Début du run ===")
@@ -483,6 +536,10 @@ def main() -> None:
 
     # Charge les IDs depuis le référentiel CSV (source de vérité)
     ref_rows = load_channels_reference(CHANNELS_REFERENCE_PATH)
+
+    # ✅ Hard-stop si CSV pollué (doublons / vides)
+    assert_channels_reference_strict(ref_rows)
+
     channel_ids = extract_channel_ids(ref_rows)
 
     valid_ids, invalid_ids = validate_channel_ids(channel_ids)
@@ -514,7 +571,7 @@ def main() -> None:
     chunks = chunk_list(valid_ids, MAX_IDS_PER_REQUEST)
 
     daily_rows_to_append: List[List] = []
-    ref_updates = {}
+    ref_updates: dict = {}
 
     for idx, chunk in enumerate(chunks, start=1):
         log(f"Appel API chunk {idx}/{len(chunks)} — {len(chunk)} chaînes")
@@ -559,7 +616,6 @@ def main() -> None:
             views = safe_int(stats.get("viewCount"), default=0)
             videos = safe_int(stats.get("videoCount"), default=0)
 
-            # Données pour mise à jour du référentiel (schéma complet)
             ref_updates[cid] = {
                 "channel_id": cid,
                 "channel_title": title,
@@ -568,7 +624,7 @@ def main() -> None:
                 "country": country,
                 "channel_published_at": channel_published_at,
                 "uploads_playlist_id": uploads_playlist_id,
-                "last_seen_utc": now_utc,
+                "last_seen_utc": now_utc,  # ✅ stable sur la journée
             }
 
             # Daily : anti-doublon (une fois par jour et par chaîne)
@@ -597,10 +653,13 @@ def main() -> None:
     else:
         log("Aucune nouvelle ligne à ajouter (peut-être déjà collecté aujourd'hui).")
 
-    # Mise à jour du référentiel complet (sans écraser language/tags/notes)
+    # Mise à jour du référentiel complet (anti-noise)
     if ref_updates:
-        upsert_reference_full_schema(REF_OUTFILE, ref_updates)
-        log(f"Référence mise à jour : {len(ref_updates)} chaînes (schéma complet)")
+        wrote = upsert_reference_full_schema(REF_OUTFILE, ref_updates)
+        if wrote:
+            log(f"Référence mise à jour : {len(ref_updates)} chaînes (schéma complet)")
+        else:
+            log("Référence inchangée.")
     else:
         log("Référence non modifiée (aucune chaîne retournée).")
 
@@ -609,3 +668,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
