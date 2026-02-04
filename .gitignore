@@ -1,35 +1,54 @@
-# --- Python cache ---
+# ============================================================
+# Python
+# ============================================================
 __pycache__/
 *.pyc
 
-# --- Environments / secrets ---
+# ============================================================
+# Environments / secrets
+# ============================================================
 .env
 .venv/
 
-# --- Runtime & logs ---
+# ============================================================
+# Runtime logs
+# ============================================================
 run_log.txt
 
-# --- Data outputs (generated) ---
+# ============================================================
+# DAILY DATA (generated – never versioned)
+# ============================================================
 data/daily/
 youtube_daily_snapshots.csv
 
-# --- Monthly snapshots (versionnés) ---
+# ============================================================
+# MONTHLY DATA (versioned – analysis snapshots)
+# ============================================================
 !data/
 !data/monthly/
 !data/monthly/*.csv
 
-# --- Local reference data (source privée) ---
+# ============================================================
+# CHANNEL REFERENCE (manual / sensitive)
+# Source of truth but NEVER versioned automatically
+# ============================================================
 channels_reference.csv
 channels_reference.xlsx
-channels_reference_backup.csv
+channels_reference_backup*.csv
 
-# --- Local backups / temp ---
+# ============================================================
+# Local backups & archives
+# ============================================================
 .local_backup/
 archive/
 
-# --- Excel temp files ---
+# ============================================================
+# Excel temp / lock files
+# ============================================================
 ~$*.xlsx
 
-# --- Local cleanup / one-off scripts ---
-channels_reference_backup_*.csv
+# ============================================================
+# Maintenance & one-off scripts (not part of pipeline)
+# ============================================================
+scripts/
 dedupe_channels_reference.py
