@@ -34,19 +34,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      # ✅ Se mettre à jour AVANT de générer/commiter
+      - name: Sync with remote (rebase)
+        run: |
+          git pull --rebase
+
       - name: Run YouTube collector
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: |
           python collect_youtube.py
 
-      - name: Commit CSV files if changed
+      - name: Commit daily snapshot if changed
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          # 🔒 On ignore toute modification de channels_reference.csv
+          git restore --worktree channels_reference.csv || true
 
+          # ✅ On ne commit QUE le snapshot daily
           git add youtube_daily_snapshots.csv || true
-          git add channels_reference.csv || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
@@ -54,10 +64,4 @@ jobs:
           fi
 
           git commit -m "chore: daily snapshot"
-
-          # Ensure clean working tree before pull --rebase
-          git reset --hard
-
-          git pull --rebase
           git push
-
