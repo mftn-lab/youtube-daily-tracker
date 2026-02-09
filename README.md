@@ -323,7 +323,6 @@ incarnated
 voice_only
 faceless
 ai_generated
-b_roll
 ```
 ---
 
@@ -340,6 +339,7 @@ Describes **what the channel is mainly about**, from an analytical perspective.
 **Allowed values**
 ```
 hardware
+smartphone
 software
 ai
 consumer_electronics
