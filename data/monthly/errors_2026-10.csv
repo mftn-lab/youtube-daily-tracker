@@ -1,0 +1,2 @@
+﻿snapshot_month,snapshot_utc,channel_id,error_type,message
+2026-10,2026-10-01T10:19:13.522217+00:00,UCuDNiVxL-Zfw0CBVQ4oOr8w,PLAYLIST_ERROR,playlistItems failed: Erreur API sur playlistItems: HTTP 404
